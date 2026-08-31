@@ -82,6 +82,25 @@ These packages carry their own MSI upgrade codes and are published as
 replaced by official OpenVPN installations. Installing both at once is still a
 bad idea - they share the `OpenVPN` install directory and service names.
 
+## Releases
+
+Releases are published automatically from tags named
+`openvpn-install-<version>-xor`. Before tagging, update `PACKAGE_VERSION`,
+`PRODUCT_VERSION` and `PRODUCT_CODE` in `windows-msi/version.m4`; the product
+code must be unique for every release. Then create and push the tag:
+
+```sh
+git tag openvpn-install-2.8_git-I001-xor
+git push origin openvpn-install-2.8_git-I001-xor
+```
+
+CI builds all three architectures and runs the XOR patch checks before creating
+the GitHub Release. The resulting x86, amd64 and arm64 MSI files are attached to
+the release with generated release notes. Existing release assets are replaced
+when the workflow is rerun. Packages are signed only when the repository's
+Google Cloud KMS signing secrets are configured; otherwise the published MSIs
+are unsigned.
+
 ## Building
 
 The build runs on Windows and is documented upstream in
@@ -112,6 +131,23 @@ rebase them.
 The `patch-check` CI job applies the patches, builds the patched OpenVPN on
 Linux and runs its unit tests, so a submodule bump that breaks the patch set
 fails in a couple of minutes instead of at the end of a full MSI build.
+
+### Stable release monitoring
+
+The `Track stable OpenVPN releases` workflow checks the latest published,
+non-prerelease OpenVPN version daily. It proceeds only after Tunnelblick adds a
+matching `openvpn-<version>/patches` directory. The workflow pins OpenVPN to the
+release tag, refreshes patches 02 through 06, updates MSI version metadata, and
+runs patch, compiler, unit and runtime checks. It creates a PR only when every
+check succeeds without modifying patch hunks. If patches are missing, fail to
+apply, produce warnings, or fail tests, CI creates or updates an
+`automated-stable-update` issue with the diagnostic log instead.
+
+The workflow can use the default `GITHUB_TOKEN` when Actions are allowed to
+create pull requests. Set a `STABLE_UPDATE_TOKEN` repository secret when PRs
+created with the default token are disabled or must trigger additional CI.
+OpenVPN GUI is pinned to its own stable release tag; vcpkg and ovpn-backports
+are reproducible commit snapshots and do not share OpenVPN's version number.
 
 To pull in upstream changes:
 

@@ -1,0 +1,190 @@
+name: Track stable OpenVPN releases
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: stable-openvpn-update
+  cancel-in-progress: false
+
+jobs:
+  stable-update:
+    name: Check for a stable OpenVPN update
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout the OpenVPN submodule
+        run: git submodule update --init src/openvpn
+
+      - name: Prepare latest stable update
+        id: prepare
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
+        run: |
+          python3 .github/scripts/prepare-stable-update.py \
+              --output "$GITHUB_OUTPUT" \
+              --report "$RUNNER_TEMP/stable-update-report.md"
+          cat "$RUNNER_TEMP/stable-update-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check for an existing update PR
+        id: existing-pr
+        if: steps.prepare.outputs.status == 'prepared'
+        env:
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
+          UPDATE_BRANCH: ${{ steps.prepare.outputs.branch }}
+        run: |
+          pr_url=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+              --head "$UPDATE_BRANCH" --json url --jq '.[0].url // empty')
+          if [ -n "$pr_url" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+            echo "An update PR already exists: $pr_url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install validation dependencies
+        if: steps.prepare.outputs.status == 'prepared' && steps.existing-pr.outputs.exists != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
+              libssl-dev liblz4-dev libpam0g-dev libcap-ng-dev libnl-genl-3-dev \
+              libcmocka-dev iproute2 python3-docutils
+
+      - name: Validate stable update
+        id: validate
+        if: steps.prepare.outputs.status == 'prepared' && steps.existing-pr.outputs.exists != 'true'
+        continue-on-error: true
+        run: .github/scripts/validate-stable-update.sh 2>&1 | tee "$RUNNER_TEMP/stable-validation.log"
+
+      - name: Create update PR
+        id: create-pr
+        if: steps.validate.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
+          UPDATE_BRANCH: ${{ steps.prepare.outputs.branch }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          REPORT: ${{ steps.prepare.outputs.report }}
+        run: |
+          {
+            echo
+            echo "### Automated validation"
+            echo
+            echo "The complete XOR patch set applies cleanly, OpenVPN builds without"
+            echo "warnings in patched files, all unit tests pass, every scramble mode"
+            echo "is accepted, and scramble disables DCO. The MSI matrix will run on this PR."
+          } >> "$REPORT"
+
+          git switch -c "$UPDATE_BRANCH"
+          git config user.name "openvpn-windows-xor automation"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/openvpn tunnelblick-patches windows-msi/version.m4
+          git -c core.hooksPath=/dev/null commit -m "chore: update OpenVPN to stable $VERSION"
+          gh auth setup-git
+          git push --force origin "HEAD:refs/heads/$UPDATE_BRANCH"
+
+          pr_url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base master \
+              --head "$UPDATE_BRANCH" \
+              --title "chore: update OpenVPN to stable $VERSION" \
+              --body-file "$REPORT")
+          echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+          echo "Created update PR: $pr_url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare manual-attention report
+        if: >-
+          always() && steps.existing-pr.outputs.exists != 'true' &&
+          (steps.prepare.outcome == 'failure' ||
+           steps.prepare.outputs.status == 'waiting' ||
+           steps.validate.outcome == 'failure' ||
+           steps.create-pr.outcome == 'failure')
+        env:
+          REPORT: ${{ steps.prepare.outputs.report }}
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+          CREATE_PR_OUTCOME: ${{ steps.create-pr.outcome }}
+        run: |
+          if [ "$VALIDATE_OUTCOME" = "failure" ]; then
+            {
+              echo
+              echo "### Automated validation failed"
+              echo
+              echo "The update needs a manual patch rebase or another source change."
+              echo
+              echo '<details><summary>Validation log (last 200 lines)</summary>'
+              echo
+              echo '```text'
+              tail -n 200 "$RUNNER_TEMP/stable-validation.log"
+              echo '```'
+              echo '</details>'
+            } >> "$REPORT"
+          fi
+          if [ "$CREATE_PR_OUTCOME" = "failure" ]; then
+            {
+              echo
+              echo "### Pull request creation failed"
+              echo
+              echo "Validation passed, but CI could not push the branch or create the PR."
+              echo "Check workflow permissions and the optional STABLE_UPDATE_TOKEN secret."
+            } >> "$REPORT"
+          fi
+          {
+            echo
+            echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$REPORT"
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update tracking issue
+        if: >-
+          always() && steps.existing-pr.outputs.exists != 'true' &&
+          (steps.prepare.outcome == 'failure' ||
+           steps.prepare.outputs.status == 'waiting' ||
+           steps.validate.outcome == 'failure' ||
+           steps.create-pr.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          REPORT: ${{ steps.prepare.outputs.report }}
+        run: |
+          title="OpenVPN $VERSION stable update requires attention"
+          gh label create automated-stable-update --repo "$GITHUB_REPOSITORY" \
+              --color D93F0B --description "Stable OpenVPN update automation" --force
+          issue_number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 100 \
+              --json number,title --jq ".[] | select(.title == \"$title\") | .number" \
+              | head -n 1)
+          if [ -n "$issue_number" ]; then
+            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --body-file "$REPORT"
+            gh issue reopen "$issue_number" --repo "$GITHUB_REPOSITORY" || true
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+                --label automated-stable-update --body-file "$REPORT"
+          fi
+
+      - name: Close resolved tracking issue
+        if: steps.create-pr.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          PR_URL: ${{ steps.create-pr.outputs.url }}
+        run: |
+          title="OpenVPN $VERSION stable update requires attention"
+          issue_number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+              --json number,title --jq ".[] | select(.title == \"$title\") | .number" \
+              | head -n 1)
+          if [ -n "$issue_number" ]; then
+            gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" \
+                --comment "Automated validation now passes; created $PR_URL."
+          fi
