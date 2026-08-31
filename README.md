@@ -85,21 +85,23 @@ bad idea - they share the `OpenVPN` install directory and service names.
 ## Releases
 
 Releases are published automatically from tags named
-`openvpn-install-<version>-xor`. Before tagging, update `PACKAGE_VERSION`,
-`PRODUCT_VERSION` and `PRODUCT_CODE` in `windows-msi/version.m4`; the product
-code must be unique for every release. Then create and push the tag:
+`openvpn-install-<PACKAGE_VERSION>`. The tag must exactly match the
+`PACKAGE_VERSION` value in `windows-msi/version.m4`; CI rejects mismatches.
+The stable-update workflow updates `PACKAGE_VERSION`, `PRODUCT_VERSION` and
+`PRODUCT_CODE` in its PR. For a manual release, update these values first and
+use a unique product code. Then create and push the matching tag:
 
 ```sh
-git tag openvpn-install-2.8_git-I001-xor
-git push origin openvpn-install-2.8_git-I001-xor
+git tag openvpn-install-2.7.6-I001-xor
+git push origin openvpn-install-2.7.6-I001-xor
 ```
 
 CI builds all three architectures and runs the XOR patch checks before creating
-the GitHub Release. The resulting x86, amd64 and arm64 MSI files are attached to
-the release with generated release notes. Existing release assets are replaced
-when the workflow is rerun. Packages are signed only when the repository's
-Google Cloud KMS signing secrets are configured; otherwise the published MSIs
-are unsigned.
+the GitHub Release. It verifies each MSI's Authenticode signature, generates a
+SHA-256 checksum and build-provenance attestation, and only then publishes the
+x86, amd64 and arm64 files. Missing signing credentials or an invalid signature
+fails the workflow; unsigned packages are never published as releases. Existing
+release assets are replaced when the workflow is rerun.
 
 ## Building
 

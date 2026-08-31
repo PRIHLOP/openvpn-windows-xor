@@ -257,6 +257,19 @@ jobs:
           submodules: true
           persist-credentials: false
 
+      - name: Validate release tag
+        run: |
+          $VersionLines = @(Select-String -Path windows-msi/version.m4 `
+              -Pattern '^define\(\[PACKAGE_VERSION\], \[([^]]+)\]\)$')
+          if ($VersionLines.Count -ne 1 -or $VersionLines[0].Matches.Count -ne 1) {
+            throw "Could not read PACKAGE_VERSION from windows-msi/version.m4"
+          }
+          $PackageVersion = $VersionLines[0].Matches[0].Groups[1].Value
+          $ExpectedTag = "openvpn-install-$PackageVersion"
+          if ($env:GITHUB_REF_NAME -cne $ExpectedTag) {
+            throw "Release tag '$env:GITHUB_REF_NAME' does not match '$ExpectedTag'"
+          }
+
       - name: Apply Tunnelblick XOR patches
         working-directory: src/openvpn
         run: |
@@ -346,6 +359,15 @@ jobs:
             [System.Text.Encoding]::ASCII)
           try {
             ./build-and-package.ps1 -sign -arch ${{ matrix.arch }}
+            $MsiFiles = @(Get-ChildItem -LiteralPath image -Filter "*-${{ matrix.arch }}.msi")
+            if ($MsiFiles.Count -ne 1) {
+              throw "Expected one ${{ matrix.arch }} MSI after signing, found $($MsiFiles.Count)"
+            }
+            $Signature = Get-AuthenticodeSignature -FilePath $MsiFiles[0].FullName
+            if ($Signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+              throw "Authenticode verification failed for $($MsiFiles[0].Name): $($Signature.StatusMessage)"
+            }
+            Write-Host "Verified Authenticode signature: $($Signature.SignerCertificate.Subject)"
           } finally {
             Remove-Item -LiteralPath $env:SigningCertificateFile -Force -ErrorAction SilentlyContinue
           }
