@@ -120,6 +120,23 @@ The `patch-check` CI job applies the patches, builds the patched OpenVPN on
 Linux and runs its unit tests, so a submodule bump that breaks the patch set
 fails in a couple of minutes instead of at the end of a full MSI build.
 
+### Stable release monitoring
+
+The `Track stable OpenVPN releases` workflow checks the latest published,
+non-prerelease OpenVPN version daily. It proceeds only after Tunnelblick adds a
+matching `openvpn-<version>/patches` directory. The workflow pins OpenVPN to the
+release tag, refreshes patches 02 through 06, updates MSI version metadata, and
+runs patch, compiler, unit and runtime checks. It creates a PR only when every
+check succeeds without modifying patch hunks. If patches are missing, fail to
+apply, produce warnings, or fail tests, CI creates or updates an
+`automated-stable-update` issue with the diagnostic log instead.
+
+The workflow can use the default `GITHUB_TOKEN` when Actions are allowed to
+create pull requests. Set a `STABLE_UPDATE_TOKEN` repository secret when PRs
+created with the default token are disabled or must trigger additional CI.
+OpenVPN GUI is pinned to its own stable release tag; vcpkg and ovpn-backports
+are reproducible commit snapshots and do not share OpenVPN's version number.
+
 To pull in upstream changes:
 
 ```sh
