@@ -1,0 +1,61 @@
+# -*- shell-script -*-
+# Webservers and/or buckets we use
+PRIMARY_WEBSERVER="swupdate.openvpn.org"
+PRIMARY_WEBSERVER_BASEURL="https://$PRIMARY_WEBSERVER/community/releases"
+SECONDARY_WEBSERVER="root@build.community.aws.openvpn.in"
+SECONDARY_WEBSERVER_PATH="/var/www/downloads/releases"
+SECONDARY_WEBSERVER_BASEURL="https://build.openvpn.net/downloads/releases"
+
+# Committing/tagging/signing
+GPG="gpg"
+GPG_KEY_ID="F554A3687412CFFEBDEFE0A312F5F7B42F2B01E7"
+# Verify signatures using a clean keyring: this ensures that verification
+# process is a close as possible to the way we have documented it.
+# This also helps catch various problems with expired subkeys and public
+# keys.
+GPG_OPTS="--no-default-keyring --keyring ~/.gnupg-security@openvpn.net/pubring.kbx"
+GIT_AUTHOR="Frank Lichtenheld <frank.lichtenheld@openvpn.com>"
+
+# Sometimes we release MSI build only with new INSTALLER_BUILD version
+# It does not require to tag and push OpenVPN sources again
+# It also does not require to re-build linux packages
+# With MSI_BUILD_ONLY="YES" we can skip all that steps
+MSI_BUILD_ONLY="NO"
+
+# Version numbers
+OPENVPN_PREVIOUS_VERSION="${OPENVPN_PREVIOUS_VERSION:-2.7.6}"
+OPENVPN_CURRENT_VERSION="${OPENVPN_CURRENT_VERSION:-2.8_git}"
+OPENVPN_CURRENT_TAG="${OPENVPN_CURRENT_TAG:-HEAD}"
+OPENVPN_PREVIOUS_TAG="refs/tags/v$OPENVPN_PREVIOUS_VERSION"
+
+OPENVPN_GUI_CURRENT_MAJ_VERSION=11
+OPENVPN_GUI_CURRENT_MIN_VERSION=65
+OPENVPN_GUI_CURRENT_FULL_VERSION="$OPENVPN_GUI_CURRENT_MAJ_VERSION.$OPENVPN_GUI_CURRENT_MIN_VERSION.0.0"
+OPENVPN_GUI_BRANCH="master"
+
+OPENVPN_DCO_PREVIOUS_VERSION="${OPENVPN_DCO_PREVIOUS_VERSION:-7.1.0.2026070800}"
+OPENVPN_DCO_CURRENT_VERSION="${OPENVPN_DCO_CURRENT_VERSION:-7.1.0.2026080300}"
+OPENVPN_DCO_CURRENT_TAG="${OPENVPN_DCO_CURRENT_TAG:-refs/tags/ovpn-net-next/main-7.1.0-rc3-2026080300}"
+OPENVPN_DCO_PREVIOUS_TAG="${OPENVPN_DCO_PREVIOUS_TAG:-refs/tags/ovpn-net-next/main-7.1.0-rc3-2026070800}"
+
+INSTALLER_BUILD=1
+INSTALLER_VERSION="I"$(printf "%03d\n" $INSTALLER_BUILD)
+# Debian packaging scripts do not allow underscores (e.g "2.4_alpha2")
+DEBIAN_UPSTREAM_VERSION=`echo $OPENVPN_CURRENT_VERSION|sed s/"_"/"~"/g`
+DEBIAN_PACKAGE_VERSION="1"
+DEBIAN_PACKAGE_BUILD_ARCHS="amd64 arm64"
+# Which Debian repos to publish to
+FREIGHT_REPOS="stable testing release_28"
+
+# MSI internal version - make sure this only contains digits and '.'
+PRODUCT_VERSION="${OPENVPN_CURRENT_VERSION/%_*/.0}"$(printf "%02d\n" $INSTALLER_BUILD)
+# MSI public version
+BUILD_VERSION="${OPENVPN_CURRENT_VERSION}-${INSTALLER_VERSION}"
+
+# Directory layout
+OUTPUT="$TOP_DIR/output/$BUILD_VERSION"
+OPENVPN="$TOP_DIR/src/openvpn"
+OPENVPN_GUI="$TOP_DIR/src/openvpn-gui"
+OPENVPN_DCO="$TOP_DIR/src/ovpn-backports"
+DEBIAN="$TOP_DIR/debian-sbuild"
+MSI="$TOP_DIR/windows-msi"

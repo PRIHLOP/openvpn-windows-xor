@@ -1,0 +1,24 @@
+name: Renovate
+on:
+  schedule:
+    - cron: '0/30 * * * *'
+  workflow_dispatch:
+jobs:
+  renovate:
+    if: github.repository_owner == 'OpenVPN'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@5402b206248e5a8c8427a15102702eb9c1793efc # v46.2.4
+        with:
+          configurationFile: .github/renovate-config.json
+          token: ${{ secrets.RENOVATE_TOKEN }}
+        env:
+          LOG_LEVEL: debug
+          RENOVATE_REPOSITORIES: >-
+            ${{ github.repository_owner }}/openvpn-build,
+            ${{ github.repository_owner }}/openvpn,
+            ${{ github.repository_owner }}/openvpn-gui,
+            ${{ github.repository_owner }}/openvpn-tests

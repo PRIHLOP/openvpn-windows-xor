@@ -1,0 +1,55 @@
+#!/bin/bash
+#
+# source-build.sh
+# Build source tarballs, create tags
+# Used by full-release-build.sh
+
+# BEFORE starting this script:
+# - make sure openvpn tag is available in src/openvpn
+# - update src/openvpn-gui
+# - update src/vcpkg
+# - check vars
+# - check vars.infrastructure (needs completed terraform apply!)
+
+set -eux
+set -o pipefail
+
+SCRIPT_DIR="$(dirname $(readlink -e "${BASH_SOURCE[0]}"))"
+TOP_DIR="$SCRIPT_DIR/.."
+pushd "$TOP_DIR"
+
+. "$SCRIPT_DIR/vars"
+. "$SCRIPT_DIR/vars.infrastructure"
+
+$SCRIPT_DIR/version-and-tags.sh
+read -p "push OpenVPN-$BUILD_VERSION in openvpn-gui?"
+if ! [[ "$MSI_BUILD_ONLY" == "YES" ]]; then
+    git -C $TOP_DIR/src/openvpn-gui push "$INTERNAL_GIT_REPO_GUI_RW" \
+        HEAD:master \
+        "v$OPENVPN_GUI_CURRENT_FULL_VERSION" \
+        "OpenVPN-$BUILD_VERSION"
+else
+    git -C $TOP_DIR/src/openvpn-gui push "$INTERNAL_GIT_REPO_GUI_RW" \
+        "OpenVPN-$BUILD_VERSION"
+fi
+# make sure git knows we pushed this
+git -C $TOP_DIR/src/openvpn-gui remote update
+#TODO: make idempotent
+if ! [[ "$MSI_BUILD_ONLY" == "YES" ]]; then
+    # Re-initialize source directory to make sure we do not have
+    # any leftovers from previous builds
+    read -p "Would you like to re-initialize source directory? (Y/n): " resp
+    if [[ "$resp" != "N" && "$resp" != "n" ]]; then
+        rm -rf "$TOP_DIR"/src/*
+        git submodule update --init --recursive
+    fi
+
+    $SCRIPT_DIR/create-release-files.sh
+    read -p "Upload tarballs to $SECONDARY_WEBSERVER?"
+    # uploads tarballs, required by some build steps
+    $SCRIPT_DIR/sign-and-push.sh
+fi
+
+# git push tag to github, but not official repo!
+git push "$INTERNAL_GIT_REPO_BUILD_RW" "OpenVPN-$BUILD_VERSION"
+git remote update

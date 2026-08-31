@@ -1,0 +1,55 @@
+name: Populate dependencies
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  VCPKG_FEATURE_FLAGS: dependencygraph
+
+jobs:
+  build:
+    # OpenVPN infrastructure only: this populates GitHub's dependency graph for
+    # submodule pins this fork does not control, at the cost of cloning vcpkg on
+    # every push.
+    if: github.repository_owner == 'OpenVPN'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        submodules: 'recursive'
+
+    - name: Bootstrap vcpkg
+      working-directory: src/vcpkg
+      run: ./bootstrap-vcpkg.sh
+    - name: vcpkg version
+      working-directory: src/vcpkg
+      run: ./vcpkg version
+    - name: Run vcpkg (openvpn)
+      working-directory: src/openvpn/contrib/vcpkg-manifests/windows/
+      run: ${{ github.workspace }}/src/vcpkg/vcpkg install --debug --overlay-triplets ${{ github.workspace }}/src/openvpn/contrib/vcpkg-triplets --overlay-ports ${{ github.workspace }}/src/openvpn/contrib/vcpkg-ports --dry-run
+
+  openvpn-gui:
+    if: github.repository_owner == 'OpenVPN'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        submodules: 'recursive'
+
+    - name: Bootstrap vcpkg
+      working-directory: src/vcpkg
+      run: ./bootstrap-vcpkg.sh
+    - name: vcpkg version
+      working-directory: src/vcpkg
+      run: ./vcpkg version
+    - name: Run vcpkg (openvpn-gui)
+      working-directory: src/openvpn-gui
+      run: ${{ github.workspace }}/src/vcpkg/vcpkg install --debug --dry-run

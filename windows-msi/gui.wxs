@@ -134,13 +134,13 @@
                     <Publish Event="NewDialog" Value="CustomizePage">1</Publish>
                 </Control>
                 <Control Id="ActiveAdaptersIcon" Type="Icon" X="15" Y="234" Width="24"  Height="24" Hidden="yes" TabSkip="no" Disabled="yes" Text="warning.ico" ToolTip="Exclamation icon">
-                    <Condition Action="show"><![CDATA[ACTIVETAPWINDOWS6ADAPTERS OR ACTIVEWINTUNADAPTERS]]></Condition>
+                    <Condition Action="show"><![CDATA[ACTIVETAPWINDOWS6ADAPTERS]]></Condition>
                 </Control>
                 <Control Id="ActiveAdaptersLabel" Type="Text" X="44" Y="234" Width="341" Height="15" Hidden="yes" NoPrefix="yes" Transparent="yes" Text="[DlgStrongFont]Active OpenVPN connection(s) detected.">
-                    <Condition Action="show"><![CDATA[ACTIVETAPWINDOWS6ADAPTERS OR ACTIVEWINTUNADAPTERS]]></Condition>
+                    <Condition Action="show"><![CDATA[ACTIVETAPWINDOWS6ADAPTERS]]></Condition>
                 </Control>
                 <Control Id="ActiveAdaptersText" Type="Text" X="44" Y="249" Width="341" Height="36" Hidden="yes" NoPrefix="yes" Transparent="yes" Text="This setup will terminate your OpenVPN connection. If you are performing this update remotely, you will get disconnected.">
-                    <Condition Action="show"><![CDATA[ACTIVETAPWINDOWS6ADAPTERS OR ACTIVEWINTUNADAPTERS]]></Condition>
+                    <Condition Action="show"><![CDATA[ACTIVETAPWINDOWS6ADAPTERS]]></Condition>
                 </Control>
                 <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="400" Height="45" Text="header.bmp" TabSkip="no" Cancel="yes" Disabled="yes">
                     <Publish Event="SpawnDialog" Value="CancelDialog">1</Publish>
@@ -303,7 +303,7 @@
                     <Subscribe Event="SelectionPathOn" Attribute="Enabled"/>
                 </Control>
                 <Control Id="Browse" Type="PushButton" X="320" Y="230" Width="60" Height="20" Text="Br&amp;owse" TabSkip="no">
-                    <Condition Action="disable">Installed</Condition>
+                    <Condition Action="hide">WIX_UPGRADE_DETECTED</Condition>
                     <Publish Event="SelectionBrowse" Value="BrowsePage">1</Publish>
                 </Control>
                 <Control Id="Reset" Type="PushButton" X="15" Y="265" Width="60" Height="20" Text="&amp;Reset" ToolTip="Resets feature selection to initial state." TabSkip="no">
