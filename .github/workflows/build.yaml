@@ -144,7 +144,9 @@ jobs:
       - name: Archive MSI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
+          name: openvpn-msi-${{ matrix.arch }}
           path: ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi
+          if-no-files-found: error
           archive: false
 
       - name: Save vcpkg cache
@@ -215,15 +217,17 @@ jobs:
               -subj '/CN=OpenVPN CI test' >/dev/null 2>&1
           chmod 600 /tmp/test-ca.key
           # every method must be accepted by the option parser
-          for m in "xormask KEY" "xorptrpos" "reverse" "obfuscate KEY"; do
+          for method in "xormask KEY" "xorptrpos" "reverse" "obfuscate KEY"; do
+            read -r -a scramble_args <<< "$method"
             out=$(timeout 10 ./src/openvpn/openvpn --dev tun --client --remote 127.0.0.1 \
-                --auth-user-pass /tmp/creds --ca /tmp/test-ca.crt --scramble $m 2>&1 || true)
+                --auth-user-pass /tmp/creds --ca /tmp/test-ca.crt \
+                --scramble "${scramble_args[@]}" 2>&1 || true)
             if echo "$out" | grep -qi "Options error"; then
-              echo "FAIL: scramble $m rejected"
+              echo "FAIL: scramble $method rejected"
               echo "$out" | tail -3
               exit 1
             fi
-            echo "ok: scramble $m"
+            echo "ok: scramble $method"
           done
           # and it must turn data channel offload off, otherwise the data channel
           # would bypass the obfuscation entirely
@@ -233,3 +237,43 @@ jobs:
           echo "$out" | grep -q -- "--scramble disables data channel offload" \
               || { echo "FAIL: --scramble did not disable DCO"; exit 1; }
           echo "ok: --scramble disables DCO"
+
+  release:
+    name: Publish GitHub Release
+    needs: [msvc, patch-check]
+    if: startsWith(github.ref, 'refs/tags/openvpn-install-') && endsWith(github.ref, '-xor')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download MSI artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: openvpn-msi-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Verify release artifacts
+        run: |
+          mapfile -t msi_files < <(find release-artifacts -maxdepth 1 -type f -name '*.msi' -print | sort)
+          if [ "${#msi_files[@]}" -ne 3 ]; then
+            echo "Expected three MSI files, found ${#msi_files[@]}"
+            printf '%s\n' "${msi_files[@]}"
+            exit 1
+          fi
+          printf '%s\n' "${msi_files[@]}"
+
+      - name: Create release and upload MSI files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t msi_files < <(find release-artifacts -maxdepth 1 -type f -name '*.msi' -print | sort)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${msi_files[@]}" \
+                --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${msi_files[@]}" \
+                --repo "$GITHUB_REPOSITORY" --verify-tag \
+                --title "$GITHUB_REF_NAME" --generate-notes
+          fi
