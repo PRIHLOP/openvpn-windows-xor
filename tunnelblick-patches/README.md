@@ -14,7 +14,7 @@ apply every `*.diff` in this directory, in filename order, with
 | Patch | Files | Contents |
 | --- | --- | --- |
 | `02-…-a` | `forward.c` | passes the `scramble` parameters into the link read/write calls |
-| `03-…-b` | `options.c`, `options_show.c` | the `scramble` directive, its defaults, its environment variables and its `--verb 4` display |
+| `03-…-b` | `options.c` | the `scramble` directive, its defaults, its environment variables and its `--verb 4` display |
 | `04-…-c` | `options.h` | `xormethod` / `xormask` / `xormasklen` in `struct connection_entry` |
 | `05-…-d` | `socket.c` | `buffer_mask()`, `buffer_xorptrpos()`, `buffer_reverse()` |
 | `06-…-e` | `socket.h` | applies those transforms in `link_socket_read()` / `link_socket_write()` |
@@ -51,15 +51,10 @@ Tunnelblick does not need this patch because DCO does not exist on macOS.
 
 Patches a-e come from Tunnelblick's
 [`third_party/sources/openvpn/openvpn-2.7.6/patches`](https://github.com/Tunnelblick/Tunnelblick/tree/main/third_party/sources/openvpn/openvpn-2.7.6/patches).
-They are **not** byte-identical copies, because Tunnelblick's context is 2.6.x /
-2.7.6 release tarballs while this repository builds the OpenVPN master branch.
-The differences are:
-
-* Rebased onto the pinned `src/openvpn` commit, which reformatted much of the
-  tree (clang-format) and changed `link_socket_read()` to return `ssize_t`.
-* The `SHOW_*` hunk moved from `options.c` to `options_show.c`, which OpenVPN
-  split out in commit `6d18f2ce`.
-* `strlen()` results are cast to `int` and `*b ^ i+1` is written
+They are **not** all byte-identical copies. Tunnelblick's patch files retain
+some OpenVPN 2.6.x context even in its 2.7.6 directory, so patch 03 is rebased
+onto the pinned 2.7.6 tag where connection environment handling changed.
+Additionally, `strlen()` results are cast to `int` and `*b ^ i+1` is written
   `*b ^ ((i + 1) & 0xff)`, so the patch compiles warning-free. Neither change
   alters behaviour - `+` already bound tighter than `^`, and the result was
   truncated to `uint8_t` by the assignment anyway.

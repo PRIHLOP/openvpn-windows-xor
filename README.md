@@ -10,8 +10,9 @@
 > Tunnelblick issue trackers or support channels. "OpenVPN" is a registered
 > trademark of OpenVPN, Inc.
 >
-> Nothing here is code-signed unless you supply your own signing credentials, so
-> Windows SmartScreen will warn about the installer.
+> CI artifacts from ordinary pushes and pull requests are intentionally
+> unsigned, so Windows SmartScreen will warn about them. Release installers are
+> built in the protected signing job described below.
 
 ## What this is
 
@@ -61,9 +62,20 @@ cannot use the offload path.
 ## Installers
 
 Every push builds unsigned x86, amd64 and arm64 MSI packages; download them from
-the artifacts of a [Build workflow run](https://github.com/PRIHLOP/openvpn-windows-xor/actions/workflows/build.yaml),
-or from the [releases page](https://github.com/PRIHLOP/openvpn-windows-xor/releases)
-if a release has been published.
+the artifacts of a [Build workflow run](https://github.com/PRIHLOP/openvpn-windows-xor/actions/workflows/build.yaml).
+Tags matching `openvpn-install-*-xor` rebuild the installers in the protected
+`release-signing` environment, sign them through Google Cloud KMS, attest their
+GitHub build provenance, and publish the signed MSI files and SHA-256 checksum
+files on the [releases page](https://github.com/PRIHLOP/openvpn-windows-xor/releases).
+Verify a downloaded installer with `sha256sum --check <file>.msi.sha256` and,
+when GitHub CLI is available, `gh attestation verify <file>.msi --repo
+PRIHLOP/openvpn-windows-xor`.
+
+Repository administrators must require approval for the `release-signing`
+environment and restrict it to protected release tags. The Google Workload
+Identity Provider must independently restrict tokens to this repository, the
+release-tag ref, the `push` event, and the signing workflow. Branch and tag
+protection are security controls configured in GitHub, not in this repository.
 
 These packages carry their own MSI upgrade codes and are published as
 `openvpn-windows-xor (unofficial build)`, so they neither replace nor get

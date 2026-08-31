@@ -32,7 +32,7 @@ if ($basedir_exists -ne $True) {
 $Env:VCPKG_ROOT = "${basedir}\src\vcpkg"
 $Env:VCPKG_OVERLAY_PORTS = "${basedir}\windows-msi\vcpkg-ports"
 $Env:CMAKE = "C:\\Program Files\\CMake\\bin\\cmake.exe"
-$Env:ManifestTimestampRFC3161Url = "http://timestamp.digicert.com"
+$Env:ManifestTimestampRFC3161Url = "https://timestamp.digicert.com"
 
 if ((Test-Path "${PSScriptRoot}/build-and-package-env.ps1") -ne $True) {
     Write-Host "WARNING: configuration file (build-and-package-env.ps1) is missing"

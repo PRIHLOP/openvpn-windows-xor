@@ -626,6 +626,7 @@ PreprocessBuildRule.prototype.transform = function (builder, str)
  * 
  * @param outName   Output .wixobj file name
  * @param inName    Input .wxs file name
+ * @param sha256    Expected SHA-256 digest
  * @param depNames  Additional dependencies
  * @param flags     Additional WiX Candle flags
  *
@@ -739,15 +740,19 @@ WiXLinkBuildRule.prototype.clean = BuildRule.prototype.clean;
  * 
  * @param outName   Output file name
  * @param url       URL to retrieve data from
+ * @param sha256    Expected SHA-256 digest
  * @param depNames  Additional dependencies
  *
  * @returns  Build rule
  */
-function DownloadBuildRule(outName, url, depNames)
+function DownloadBuildRule(outName, url, sha256, depNames)
 {
     BuildRule.call(this, [outName], depNames);
 
     this.url = url;
+    this.sha256 = sha256.toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(this.sha256))
+        throw new Error("Invalid SHA-256 digest for " + url + ".");
 
     return this;
 }
@@ -777,7 +782,33 @@ DownloadBuildRule.prototype.build = function (builder)
     } else
         throw new Error("GET " + this.url + " failed with status " + req.Status + " " + req.StatusText + ".");
 
+    this.verify(builder);
     BuildRule.prototype.build.call(this, builder);
+}
+
+
+/**
+ * Verifies the downloaded file before it is executed or packaged.
+ *
+ * @param builder  The builder object
+ */
+DownloadBuildRule.prototype.verify = function (builder)
+{
+    builder.env("OPENVPN_BUILD_VERIFY_FILE") = builder.fso.GetAbsolutePathName(this.outNames[0]);
+    builder.env("OPENVPN_BUILD_VERIFY_SHA256") = this.sha256;
+    try {
+        var result = builder.wsh.Run(
+            'powershell.exe -NoLogo -NoProfile -NonInteractive -Command ' +
+            '"$actual=(Get-FileHash -LiteralPath $env:OPENVPN_BUILD_VERIFY_FILE -Algorithm SHA256).Hash.ToLowerInvariant(); ' +
+            'if ($actual -ne $env:OPENVPN_BUILD_VERIFY_SHA256) { Write-Error (\'SHA-256 mismatch: \' + $actual); exit 1 }"',
+            0,
+            true);
+        if (result != 0)
+            throw new Error("SHA-256 verification failed for " + this.outNames[0] + ".");
+    } finally {
+        builder.env("OPENVPN_BUILD_VERIFY_FILE") = "";
+        builder.env("OPENVPN_BUILD_VERIFY_SHA256") = "";
+    }
 }
 
 
@@ -788,7 +819,13 @@ DownloadBuildRule.prototype.build = function (builder)
  * 
  * @returns  Oldest timestamp of the output files if all exist; 0 otherwise
  */
-DownloadBuildRule.prototype.buildTime = BuildRule.prototype.buildTime;
+DownloadBuildRule.prototype.buildTime = function (builder)
+{
+    var ts = BuildRule.prototype.buildTime.call(this, builder);
+    if (ts != 0)
+        this.verify(builder);
+    return ts;
+}
 
 
 /**

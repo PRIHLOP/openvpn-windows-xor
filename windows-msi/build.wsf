@@ -126,6 +126,7 @@ clean	Cleans intermediate and output files</example>
             b.pushRule(new DownloadBuildRule(
             BuildPath(buildPath, "openvpnserv2.exe"),
                 "https://github.com/OpenVPN/openvpnserv2/releases/download/" + ver.define.OVPNSERV2_VERSION + "/openvpnserv2-" + ver.define.OVPNSERV2_VERSION +"-signed.exe",
+                ver.define.OVPNSERV2_SHA256,
                 ["version.m4"]));
 
             // Downloading and extracting Easy RSA
@@ -134,6 +135,7 @@ clean	Cleans intermediate and output files</example>
                 "https://github.com/OpenVPN/easy-rsa/releases/download/v"
                     + ver.define.EASYRSA_VERSION
                     + "/EasyRSA-" + ver.define.EASYRSA_VERSION + "-win64.zip",
+                ver.define.EASYRSA_SHA256,
                 ["version.m4"]));
             b.pushRule(new ExtractBuildRule(
                 [
@@ -167,12 +169,14 @@ clean	Cleans intermediate and output files</example>
                         + "/tap-windows-" + ver.define.PRODUCT_TAP_WIN_VERSION
                         + "-" + ver.define.PRODUCT_TAP_WIN_INSTALLER_VERSION
                         + "-" + p.tapWinPlat + ".msm",
+                    ver.define["PRODUCT_TAP_WIN_SHA256_" + p.tapWinPlat],
                     ["version.m4"]));
 
                 // Downloading ovpn-dco
                 b.pushRule(new DownloadBuildRule(
                     BuildPath(p.buildPath, "ovpn-dco.msm"),
                     "https://github.com/OpenVPN/ovpn-dco-win/releases/download/" + ver.define.PRODUCT_OVPN_DCO_VERSION + "/ovpn-dco-" + plat + ".msm",
+                    ver.define["PRODUCT_OVPN_DCO_SHA256_" + plat],
                     ["version.m4"]));
 
                 // WiX compiler flags
