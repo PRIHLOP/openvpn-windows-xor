@@ -3,25 +3,29 @@ dnl Downloadables
 dnl ============================================================
 
 dnl TAP-Windows binaries
-define([PRODUCT_TAP_WIN_URL_x86],      [https://build.openvpn.net/downloads/releases/tap-windows-9.24.6-I601-i386.msm])
-define([PRODUCT_TAP_WIN_URL_amd64],    [https://build.openvpn.net/downloads/releases/tap-windows-9.24.6-I601-amd64.msm])
-define([PRODUCT_TAP_WIN_URL_arm64],    [https://build.openvpn.net/downloads/releases/tap-windows-9.24.6-I601-arm64.msm])
-define([PRODUCT_TAP_WIN_COMPONENT_ID], [tap0901])
-define([PRODUCT_TAP_WIN_NAME],         [TAP-Windows])
+dnl renovate: datasource=github-releases depName=OpenVPN/tap-windows6
+define([PRODUCT_TAP_WIN_VERSION],           [9.27.0])
+dnl Note: Not handled by renovate
+define([PRODUCT_TAP_WIN_INSTALLER_VERSION], [I0])
+define([PRODUCT_TAP_WIN_COMPONENT_ID],      [tap0901])
+define([PRODUCT_TAP_WIN_NAME],              [TAP-Windows])
 
-dnl Wintun binaries
-define([PRODUCT_WINTUN_URL_x86],       [https://www.wintun.net/builds/wintun-x86-0.8.1.msm])
-define([PRODUCT_WINTUN_URL_amd64],     [https://www.wintun.net/builds/wintun-amd64-0.8.1.msm])
-dnl This is only to make build script happy - the file is only downloaded but not used, since there is no arm64 wintun MSM (yet)
-define([PRODUCT_WINTUN_URL_arm64],     [https://www.wintun.net/builds/wintun-amd64-0.8.1.msm])
+dnl ovpn-dco binaries
+dnl renovate: datasource=github-releases depName=OpenVPN/ovpn-dco-win
+define([PRODUCT_OVPN_DCO_VERSION],     [2.8.6])
 
 dnl OpenVPNServ2.exe binary
-define([OPENVPNSERV2_URL], [http://build.openvpn.net/downloads/releases/openvpnserv2-1.4.0.1.exe])
+dnl renovate: datasource=github-releases depName=OpenVPN/openvpnserv2 versioning=loose
+define([OVPNSERV2_VERSION], [2.0.1.0])
 
-dnl Easy RSA binaries (URL to .tar.gz file containing "easy-rsa-[EASYRSA_VERSION]" folder with Easy RSA)
-define([EASYRSA_VERSION], [3.1.0])
-define([EASYRSA_URL],     [https://github.com/OpenVPN/easy-rsa/releases/download/v3.1.0/EasyRSA-3.1.0-win64.zip])
-
+dnl Easy-RSA binaries:
+dnl URL to .zip file containing "easy-rsa-[EASYRSA_VERSION]" folder with Easy-RSA.
+dnl The OpenSSL binaries, which come with Easy-RSA, are not used by Openvpn-build.
+dnl The only binaries which Openvpn-build uses from Easy-RSA, are the *nix style
+dnl (32bit only) binaries for Windows, from easy-rsa/distro/windows/bin.
+dnl Further details: easy-rsa/distro/windows/Licensing/mksh-Win32.txt
+dnl renovate: datasource=github-releases depName=OpenVPN/easy-rsa
+define([EASYRSA_VERSION], [3.2.6])
 
 dnl ============================================================
 dnl MSI Provisioning
@@ -29,24 +33,26 @@ dnl ============================================================
 
 dnl Define the product name and publisher.
 define([PRODUCT_NAME],      [OpenVPN])
-define([PRODUCT_PUBLISHER], [OpenVPN, Inc.])
+define([PRODUCT_PUBLISHER], [openvpn-windows-xor (unofficial build)])
 
 dnl The package version as displayed by UI and used in filenames (no spaces, please).
-define([PACKAGE_VERSION], [2.5.5-I602])
+define([PACKAGE_VERSION], [2.8_git-I001-xor])
 
 dnl The MSI product version in the form of n[.n[.n]] (numbers only).
-dnl The third field is 100*product release + package version.
-dnl The fourth field is ignored by MSI.
-define([PRODUCT_VERSION], [2.5.028])
+dnl The third field is 100*openvpn bugfix release + MSI build number.
+dnl So for the 2nd MSI build for OpenVPN 2.6.3 use 2.6.302
+define([PRODUCT_VERSION], [2.8.0])
 
 dnl The MSI product code MUST change on each product release.
-define([PRODUCT_CODE], [{ECDEB23C-E72D-F54F-081D-D2180DBF1497}])
+define([PRODUCT_CODE], [{78EC1F6C-8E70-4760-B16D-BEC01940FA40}])
 
 dnl The MSI upgrade codes MUST persist for all versions of the same product line.
-dnl Please use own upgrade codes when deploying a non-official OpenVPN release.
-define([UPGRADE_CODE_x86],   [{1195A47B-A37A-4055-9D34-B7A691F7E97B}])
-define([UPGRADE_CODE_amd64], [{461BDF86-D389-4471-BF36-99806B64C127}])
-define([UPGRADE_CODE_arm64], [{1E8C4DDC-9E93-4AE2-9495-DF86821EAA3A}])
+dnl These are deliberately NOT the upstream OpenVPN, Inc. upgrade codes: this is an
+dnl unofficial build, and reusing the official codes would make these packages
+dnl silently upgrade (or be upgraded by) official OpenVPN installations.
+define([UPGRADE_CODE_x86],   [{095A7F10-A48E-4AFA-A73E-9521D9992D94}])
+define([UPGRADE_CODE_amd64], [{F4221C42-93CD-4EF7-BEC9-05B6B5C0E341}])
+define([UPGRADE_CODE_arm64], [{FAA007E4-1F8D-4AF2-9AEA-B558B72FB266}])
 
 dnl OpenVPN configration file extension (e.g. conf, ovpn...)
 define([CONFIG_EXTENSION], [ovpn])

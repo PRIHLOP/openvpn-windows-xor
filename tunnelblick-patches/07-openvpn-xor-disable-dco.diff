@@ -1,0 +1,17 @@
+diff --git a/src/openvpn/dco.c b/src/openvpn/dco.c
+index ce73701e..b28bb779 100644
+--- a/src/openvpn/dco.c
++++ b/src/openvpn/dco.c
+@@ -264,6 +264,12 @@ dco_check_option_ce(const struct connection_entry *ce, msglvl_t msglevel, int mo
+         return false;
+     }
+ 
++    if (ce->xormethod != 0)
++    {
++        msg(msglevel, "Note: --scramble disables data channel offload.");
++        return false;
++    }
++
+     if (ce->socks_proxy_server)
+     {
+         msg(msglevel, "Note: --socks-proxy disables data channel offload.");

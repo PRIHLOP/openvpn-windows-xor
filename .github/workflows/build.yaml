@@ -3,8 +3,11 @@ name: Build
 on:
   push:
   pull_request:
-  schedule:
-    - cron: '0 2 * * *' # run at 2 AM UTC
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # This is required for requesting the JWT
+  contents: read    # This is required for actions/checkoutjobs
 
 jobs:
   msvc:
@@ -14,81 +17,211 @@ jobs:
 
     env:
       CMAKE: cmake.exe
-      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
-      OSSL: ossl3
-      VCPKG_OVERLAY_PORTS: ${{ github.workspace }}\openvpn-build\windows-msi\vcpkg-ports
       WIX: ${{ github.workspace }}\wix\
+      JsignJar: ${{ github.workspace }}\jsign.jar
+      SigningStoreType: GOOGLECLOUD
+      SigningKeyStore: ${{ secrets.GOOGLE_CLOUD_KMS_KEYRING }}
+      SigningStoreKeyName: ${{ secrets.GOOGLE_CLOUD_KMS_KEY }}
+      SigningCertificateFile: ${{ github.workspace }}/certificate.pem
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
 
     name: 'openvpn-build'
-    runs-on: windows-2019
+    runs-on: windows-2022
 
     steps:
-      - name: Get date
-        run: |
-          $date = Get-Date -Format "ddMMyyyy"
-          echo "DATE=${date}" >> $Env:GITHUB_ENV
-
       - name: Checkout openvpn-build
-        uses: actions/checkout@v2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: openvpn-build
-
-      - name: Checkout openvpn
-        uses: actions/checkout@v2
-        with:
-          repository: openvpn/openvpn
-          ref: master
-          path: openvpn
-      
-      - name: Copy TunnelBlick patches
-        run: cp ${{ github.workspace }}\openvpn-build\tunnelblick-patches\* ${{ github.workspace }}\openvpn\
-      
-      - name: Apply TunnelBlick patch A
-        run: cd ${{ github.workspace }}\openvpn\ && git apply --ignore-whitespace -v 02-tunnelblick-openvpn_xorpatch-a.diff
-      - name: Apply TunnelBlick patch B
-        run: cd ${{ github.workspace }}\openvpn\ && git apply --ignore-whitespace -v 03-tunnelblick-openvpn_xorpatch-b.diff
-      - name: Apply TunnelBlick patch C
-        run: cd ${{ github.workspace }}\openvpn\ && git apply --ignore-whitespace -v 04-tunnelblick-openvpn_xorpatch-c.diff
-      - name: Apply TunnelBlick patch D
-        run: cd ${{ github.workspace }}\openvpn\ && git apply --ignore-whitespace -v 05-tunnelblick-openvpn_xorpatch-d.diff
-      - name: Apply TunnelBlick patch E
-        run: cd ${{ github.workspace }}\openvpn\ && git apply --ignore-whitespace -v 06-tunnelblick-openvpn_xorpatch-e.diff
-
-      - name: Checkout openvpn-gui
-        uses: actions/checkout@v2
-        with:
-          repository: openvpn/openvpn-gui
-          path: openvpn-gui
-
-      - name: Checkout vcpkg
-        uses: actions/checkout@v2
-        with:
-          repository: microsoft/vcpkg
-          path: vcpkg
           fetch-depth: 0
+          submodules: true
+
+      # This is the whole point of this fork: patch the OpenVPN sources with the
+      # Tunnelblick XOR ("scramble") obfuscation patch before anything is built.
+      # The patches are maintained against the exact src/openvpn submodule commit
+      # this repository pins, so a failure here means the submodule moved and the
+      # patches need to be rebased - see tunnelblick-patches/README.md.
+      - name: Apply Tunnelblick XOR patches
+        working-directory: src/openvpn
+        run: |
+          Get-ChildItem "${{ github.workspace }}\tunnelblick-patches\*.diff" | Sort-Object Name | ForEach-Object {
+            Write-Host "Applying $($_.Name)"
+            git apply --ignore-whitespace -v $_.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to apply $($_.Name) - the patches likely need a rebase onto the current src/openvpn commit"
+            }
+          }
+          git --no-pager diff --stat
+
+      - name: Restore vcpkg cache
+        id: vcpkg-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: "${{ github.workspace }}/vcpkg_cache"
+          key: vcpkg-${{ matrix.arch }}-${{ hashFiles('**/src/openvpn/contrib/vcpkg-manifests/windows/vcpkg.json', '**/src/vcpkg/ports/openssl/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ matrix.arch }}-
+
+      - name: Install vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/src/vcpkg'
+          vcpkgJsonGlob: '**/src/openvpn/contrib/vcpkg-manifests/windows/vcpkg.json'
 
       - name: Get latest CMake and ninja
-        uses: lukka/get-cmake@latest
+        uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
 
       - name: Install rst2html
-        run: python -m pip install --upgrade pip rst2html
+        run: python -m pip install --upgrade pip docutils
 
       - name: Setup MSVC prompt
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
-      - name: Install Wix 3.14
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        if: ${{ env.SigningKeyStore != '' }}
+        with:
+          java-version: 17
+          distribution: 'temurin'
+
+      - name: Download Jsign
+        if: ${{ env.SigningKeyStore != '' }}
         run: |
-          Invoke-WebRequest -Uri "https://wixdl.blob.core.windows.net/releases/v3.14.0.5722/wix314-binaries.zip" -OutFile wix.zip
+          Invoke-WebRequest -Uri "https://github.com/ebourg/jsign/releases/download/6.0/jsign-6.0.jar" -OutFile jsign.jar
+
+      - name: Install Wix 3.14.1
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile wix.zip
           Expand-Archive -Path .\wix.zip -DestinationPath wix\bin
 
-      - name: Build
-        working-directory: openvpn-build/windows-msi
+      - name: Bump version
+        working-directory: windows-msi
+        if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
         run: |
-          New-Item -Name build-and-package-env.ps1 -ItemType File
-          ./build-and-package.ps1 -basedir ../.. -ossl ossl3 -nosign -arch ${{ matrix.arch }} -nodevprompt
+          $NewProductCode = (New-Guid).ToString().ToUpper()
+          $BuildVersion = 10000 + [int]$env:GITHUB_RUN_NUMBER
+          # Keep the major.minor of version.m4 so that MSI upgrade logic keeps working
+          $Major = (Select-String -Path version.m4 -Pattern '^define\(\[PRODUCT_VERSION\], \[(\d+)\.(\d+)').Matches[0]
+          $NewProductVersion = "$($Major.Groups[1].Value).$($Major.Groups[2].Value).${BuildVersion}"
+          echo $NewProductCode $NewProductVersion
+          $version_m4 = (Get-Content version.m4)
+          $version_m4 -replace '^define\(\[PRODUCT_CODE\], \[\{(?<ProductCode>.*)\}]\)', "define([PRODUCT_CODE], [{${NewProductCode}}])" `
+            -replace '^define\(\[PRODUCT_VERSION\], \[(.*?)\]\)', "define([PRODUCT_VERSION], [${NewProductVersion}])" | Out-File -Encoding ASCII version.m4
 
-      - name: Archive artifacts
-        uses: actions/upload-artifact@v2
+      - name: Authenticate to Google Cloud
+        id: 'auth'
+        uses: 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093' # v3
+        if: ${{ env.SigningKeyStore != '' }}
         with:
-          name: openvpn-master-${{ matrix.arch }}-${{ env.DATE }}
-          path: ${{ github.workspace }}\openvpn-build\windows-msi\image\*-${{ matrix.arch }}.msi
+          create_credentials_file: false
+          token_format: 'access_token'
+          workload_identity_provider: ${{ secrets.GOOGLE_CLOUD_WIP }}
+          service_account: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT }}
+          access_token_lifetime: '600s'
+
+      - name: Build and Sign
+        working-directory: windows-msi
+        env:
+           SigningStorePass: ${{ steps.auth.outputs.access_token }}
+        if: ${{ env.SigningKeyStore != '' }}
+        run: |
+          echo "${{ secrets.SIGNING_CERTIFICATE }}" >${{ github.workspace }}/certificate.pem
+          ./build-and-package.ps1 -sign -arch ${{ matrix.arch }}
+
+      - name: Build
+        working-directory: windows-msi
+        if: ${{ env.SigningKeyStore == '' }}
+        run: |
+          ./build-and-package.ps1 -arch ${{ matrix.arch }}
+
+      - name: Rename MSI
+        run: |
+          $commit = git -C ./src/openvpn rev-parse --short HEAD
+          $dt = Get-Date -Format "yyyyMMddThhmm"
+          $orig_msi_name = (Get-Item .\windows-msi\image\*-${{ matrix.arch }}.msi).Name
+          $msi_name = $orig_msi_name -replace '^(OpenVPN-.*?)-(${{ matrix.arch }}\.msi)', "`$1+${dt}-${commit}-`$2"
+          mv .\windows-msi\image\$orig_msi_name .\windows-msi\image\$msi_name
+
+      - name: Archive MSI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi
+          archive: false
+
+      - name: Save vcpkg cache
+        if: steps.vcpkg-restore.outputs.cache-hit != 'true'
+        id: vcpkg-save
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: "${{ github.workspace }}/vcpkg_cache"
+          key: ${{ steps.vcpkg-restore.outputs.cache-primary-key }}
+
+  # Cheap sanity check for the patch set itself: applying the patches and
+  # building OpenVPN on Linux takes a couple of minutes, while the MSI build
+  # above takes tens of minutes. If the src/openvpn submodule is bumped and the
+  # patches no longer apply (or no longer compile), this job says so first.
+  patch-check:
+    name: Verify Tunnelblick XOR patches
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout openvpn-build
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Checkout the openvpn submodule only
+        run: git submodule update --init src/openvpn
+
+      - name: Apply Tunnelblick XOR patches
+        working-directory: src/openvpn
+        run: |
+          for p in ../../tunnelblick-patches/*.diff; do
+            echo "Applying $(basename "$p")"
+            git apply --ignore-whitespace -v "$p"
+          done
+          git --no-pager diff --stat
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
+              libssl-dev liblz4-dev libpam0g-dev libcap-ng-dev libnl-genl-3-dev \
+              libcmocka-dev iproute2 python3-docutils
+
+      - name: Build patched OpenVPN
+        working-directory: src/openvpn
+        run: |
+          autoreconf -ivf
+          ./configure --disable-lzo
+          make -j"$(nproc)" 2>&1 | tee /tmp/build.log
+          # the patch must not introduce compiler warnings of its own
+          if grep -iE 'warning' /tmp/build.log | grep -E 'socket\.(c|h)|forward\.c|options(_show)?\.c|dco\.c'; then
+            echo "FAIL: patched files produce compiler warnings"
+            exit 1
+          fi
+
+      - name: Run OpenVPN unit tests
+        working-directory: src/openvpn
+        run: make -C tests/unit_tests check
+
+      - name: Check that --scramble is wired up and disables DCO
+        working-directory: src/openvpn
+        run: |
+          set -e
+          printf 'user\npass\n' > /tmp/creds
+          # every method must be accepted by the option parser
+          for m in "xormask KEY" "xorptrpos" "reverse" "obfuscate KEY"; do
+            out=$(timeout 10 ./src/openvpn/openvpn --dev tun --client --remote 127.0.0.1 \
+                --auth-user-pass /tmp/creds --ca /nonexistent.pem --scramble $m 2>&1 || true)
+            if echo "$out" | grep -qi "Options error"; then
+              echo "FAIL: scramble $m rejected"
+              echo "$out" | tail -3
+              exit 1
+            fi
+            echo "ok: scramble $m"
+          done
+          # and it must turn data channel offload off, otherwise the data channel
+          # would bypass the obfuscation entirely
+          timeout 10 ./src/openvpn/openvpn --verb 4 --dev tun --client --remote 127.0.0.1 \
+              --auth-user-pass /tmp/creds --ca /nonexistent.pem --scramble xormask KEY 2>&1 \
+              | grep -q -- "--scramble disables data channel offload" \
+              || { echo "FAIL: --scramble did not disable DCO"; exit 1; }
+          echo "ok: --scramble disables DCO"

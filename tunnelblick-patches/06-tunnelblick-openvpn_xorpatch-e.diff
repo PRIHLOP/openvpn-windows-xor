@@ -1,35 +1,36 @@
-Only in openvpn-2.5_git_57d6f10.old/src/openvpn: socket.c.orig
-Only in openvpn-2.5_git_19d6d9c.old/src/openvpn: socket.c.orig
-Only in openvpn-2.5_beta1.old/src/openvpn: socket.c.orig
-diff -u -r -x .DS_Store openvpn-2.5_beta1.old/src/openvpn/socket.h openvpn-2.5_beta1.new/src/openvpn/socket.h
---- openvpn-2.5_beta1.old/src/openvpn/socket.h	2020-08-16 11:57:17.000000000 -0400
-+++ openvpn-2.5_beta1.new/src/openvpn/socket.h	2020-08-16 11:57:17.000000000 -0400
-@@ -249,6 +249,10 @@
+diff --git a/src/openvpn/socket.h b/src/openvpn/socket.h
+index 1a532e14..5aae085a 100644
+--- a/src/openvpn/socket.h
++++ b/src/openvpn/socket.h
+@@ -254,6 +254,12 @@ struct link_socket
  #endif
  };
  
 +int buffer_mask(struct buffer *buf, const char *xormask, int xormasklen);
++
 +int buffer_xorptrpos(struct buffer *buf);
++
 +int buffer_reverse(struct buffer *buf);
 +
  /*
   * Some Posix/Win32 differences.
   */
-@@ -1049,30 +1053,56 @@
- static inline int
- link_socket_read(struct link_socket *sock,
-                  struct buffer *buf,
--                 struct link_socket_actual *from)
-+                 struct link_socket_actual *from,
-+                 int xormethod,
-+                 const char *xormask,
-+                 int xormasklen)
- {
-+    int res;
-     if (proto_is_udp(sock->info.proto)) /* unified UDPv4 and UDPv6 */
-     {
--        int res;
+@@ -614,32 +620,63 @@ ssize_t link_socket_read_udp_posix(struct link_socket *sock, struct buffer *buf,
  
+ /* read a TCP or UDP packet from link */
+ static inline ssize_t
+-link_socket_read(struct link_socket *sock, struct buffer *buf, struct link_socket_actual *from)
++link_socket_read(struct link_socket *sock, struct buffer *buf, struct link_socket_actual *from,
++                 int xormethod, const char *xormask, int xormasklen)
+ {
++    ssize_t res;
++
+     if (proto_is_udp(sock->info.proto) || socket_is_dco_win(sock))
+     /* unified UDPv4 and UDPv6, for DCO-WIN the kernel
+      * will strip the length header */
+     {
+-        ssize_t res;
+-
  #ifdef _WIN32
          res = link_socket_read_udp_win32(sock, buf, from);
  #else
@@ -40,7 +41,7 @@ diff -u -r -x .DS_Store openvpn-2.5_beta1.old/src/openvpn/socket.h openvpn-2.5_b
      else if (proto_is_tcp(sock->info.proto)) /* unified TCPv4 and TCPv6 */
      {
          /* from address was returned by accept */
-         addr_copy_sa(&from->dest, &sock->info.lsa->actual.dest);
+         from->dest = sock->info.lsa->actual.dest;
 -        return link_socket_read_tcp(sock, buf);
 +        res = link_socket_read_tcp(sock, buf);
      }
@@ -49,66 +50,77 @@ diff -u -r -x .DS_Store openvpn-2.5_beta1.old/src/openvpn/socket.h openvpn-2.5_b
          ASSERT(0);
          return -1; /* NOTREACHED */
      }
-+    switch(xormethod)
++
++    switch (xormethod)
 +    {
 +        case 0:
 +            break;
++
 +        case 1:
-+            buffer_mask(buf,xormask,xormasklen);
++            buffer_mask(buf, xormask, xormasklen);
 +            break;
++
 +        case 2:
 +            buffer_xorptrpos(buf);
 +            break;
++
 +        case 3:
 +            buffer_reverse(buf);
 +            break;
++
 +        case 4:
-+            buffer_mask(buf,xormask,xormasklen);
++            buffer_mask(buf, xormask, xormasklen);
 +            buffer_xorptrpos(buf);
 +            buffer_reverse(buf);
 +            buffer_xorptrpos(buf);
 +            break;
++
 +        default:
-+            ASSERT (0);
++            ASSERT(0);
 +            return -1; /* NOTREACHED */
 +    }
++
 +    return res;
  }
  
  /*
-@@ -1163,8 +1193,34 @@
- static inline int
- link_socket_write(struct link_socket *sock,
-                   struct buffer *buf,
--                  struct link_socket_actual *to)
-+                  struct link_socket_actual *to,
-+                  int xormethod,
-+                  const char *xormask,
-+                  int xormasklen)
+@@ -733,8 +770,38 @@ link_socket_write_udp(struct link_socket *sock, struct buffer *buf, struct link_
+ 
+ /* write a TCP or UDP packet to link */
+ static inline ssize_t
+-link_socket_write(struct link_socket *sock, struct buffer *buf, struct link_socket_actual *to)
++link_socket_write(struct link_socket *sock, struct buffer *buf, struct link_socket_actual *to,
++                  int xormethod, const char *xormask, int xormasklen)
  {
-+    switch(xormethod)
++    switch (xormethod)
 +    {
 +        case 0:
 +            break;
++
 +        case 1:
-+            buffer_mask(buf,xormask,xormasklen);
++            buffer_mask(buf, xormask, xormasklen);
 +            break;
++
 +        case 2:
 +            buffer_xorptrpos(buf);
 +            break;
++
 +        case 3:
 +            buffer_reverse(buf);
 +            break;
++
 +        case 4:
 +            buffer_xorptrpos(buf);
 +            buffer_reverse(buf);
 +            buffer_xorptrpos(buf);
-+            buffer_mask(buf,xormask,xormasklen);
++            buffer_mask(buf, xormask, xormasklen);
 +            break;
++
 +        default:
-+            ASSERT (0);
++            ASSERT(0);
 +            return -1; /* NOTREACHED */
 +    }
-     if (proto_is_udp(sock->info.proto)) /* unified UDPv4 and UDPv6 */
++
+     if (proto_is_udp(sock->info.proto) || socket_is_dco_win(sock))
      {
-         return link_socket_write_udp(sock, buf, to);
+         /* unified UDPv4, UDPv6 and DCO-WIN (driver adds length header) */

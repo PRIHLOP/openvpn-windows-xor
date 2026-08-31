@@ -1,0 +1,16 @@
+[submodule "src/openvpn-gui"]
+	path = src/openvpn-gui
+	url = https://github.com/OpenVPN/openvpn-gui.git
+	branch = master
+[submodule "src/openvpn"]
+	path = src/openvpn
+	url = https://github.com/OpenVPN/openvpn.git
+	branch = master
+[submodule "src/vcpkg"]
+	path = src/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
+	branch = master
+[submodule "src/ovpn-backports"]
+	path = src/ovpn-backports
+	url = https://github.com/OpenVPN/ovpn-backports
+	branch = sources

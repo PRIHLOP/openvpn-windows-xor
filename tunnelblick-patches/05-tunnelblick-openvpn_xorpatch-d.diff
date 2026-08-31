@@ -1,7 +1,11 @@
---- openvpn-2.5_git_974513e/src/openvpn/socket.c	2017-08-17 11:27:23.000000000 -0400
-+++ openvpn-2.5_git_974513e_patched/src/openvpn/socket.c	2017-08-18 18:37:11.000000000 -0400
-@@ -46,4 +46,54 @@
-
+diff --git a/src/openvpn/socket.c b/src/openvpn/socket.c
+index 0f66ad51..628a8fbb 100644
+--- a/src/openvpn/socket.c
++++ b/src/openvpn/socket.c
+@@ -70,6 +70,56 @@ sf2gaf(const unsigned int getaddr_flags, const unsigned int sockflags)
+     }
+ }
+ 
 +int buffer_mask(struct buffer *buf, const char *mask, int xormasklen)
 +{
 +    int i;
@@ -19,7 +23,7 @@
 +    int i;
 +    uint8_t *b;
 +    for (i = 0, b = BPTR (buf); i < BLEN(buf); i++, b++) {
-+        *b = *b ^ i+1;
++        *b = (uint8_t)(*b ^ ((i + 1) & 0xff));
 +    }
 +    return BLEN (buf);
 +}
@@ -53,5 +57,5 @@
 +}
 +
  /*
-  * Convert sockflags/getaddr_flags into getaddr_flags
+  * Functions related to the translation of DNS names to IP addresses.
   */
