@@ -207,10 +207,17 @@ jobs:
         run: |
           set -e
           printf 'user\npass\n' > /tmp/creds
+          chmod 600 /tmp/creds
+          # Use a valid temporary CA so parser checks are not confused by an
+          # unrelated "Options error" for a missing certificate file.
+          openssl req -x509 -newkey rsa:2048 -nodes \
+              -keyout /tmp/test-ca.key -out /tmp/test-ca.crt -days 1 \
+              -subj '/CN=OpenVPN CI test' >/dev/null 2>&1
+          chmod 600 /tmp/test-ca.key
           # every method must be accepted by the option parser
           for m in "xormask KEY" "xorptrpos" "reverse" "obfuscate KEY"; do
             out=$(timeout 10 ./src/openvpn/openvpn --dev tun --client --remote 127.0.0.1 \
-                --auth-user-pass /tmp/creds --ca /nonexistent.pem --scramble $m 2>&1 || true)
+                --auth-user-pass /tmp/creds --ca /tmp/test-ca.crt --scramble $m 2>&1 || true)
             if echo "$out" | grep -qi "Options error"; then
               echo "FAIL: scramble $m rejected"
               echo "$out" | tail -3
@@ -220,8 +227,9 @@ jobs:
           done
           # and it must turn data channel offload off, otherwise the data channel
           # would bypass the obfuscation entirely
-          timeout 10 ./src/openvpn/openvpn --verb 4 --dev tun --client --remote 127.0.0.1 \
-              --auth-user-pass /tmp/creds --ca /nonexistent.pem --scramble xormask KEY 2>&1 \
-              | grep -q -- "--scramble disables data channel offload" \
+          out=$(timeout 10 ./src/openvpn/openvpn --verb 4 --dev tun --client --remote 127.0.0.1 \
+              --auth-user-pass /tmp/creds --ca /tmp/test-ca.crt \
+              --scramble xormask KEY 2>&1 || true)
+          echo "$out" | grep -q -- "--scramble disables data channel offload" \
               || { echo "FAIL: --scramble did not disable DCO"; exit 1; }
           echo "ok: --scramble disables DCO"
