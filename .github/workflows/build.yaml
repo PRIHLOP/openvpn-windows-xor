@@ -128,7 +128,7 @@ jobs:
             ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi
             ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi.sha256
           if-no-files-found: error
-          archive: false
+          compression-level: 0
 
       - name: Save vcpkg cache
         if: steps.vcpkg-restore.outputs.cache-hit != 'true'
@@ -397,7 +397,7 @@ jobs:
             ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi
             ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi.sha256
           if-no-files-found: error
-          archive: false
+          compression-level: 0
 
   release:
     name: Publish signed GitHub Release

@@ -794,21 +794,34 @@ DownloadBuildRule.prototype.build = function (builder)
  */
 DownloadBuildRule.prototype.verify = function (builder)
 {
-    builder.env("OPENVPN_BUILD_VERIFY_FILE") = builder.fso.GetAbsolutePathName(this.outNames[0]);
-    builder.env("OPENVPN_BUILD_VERIFY_SHA256") = this.sha256;
-    try {
-        var result = builder.wsh.Run(
-            'powershell.exe -NoLogo -NoProfile -NonInteractive -Command ' +
-            '"$actual=(Get-FileHash -LiteralPath $env:OPENVPN_BUILD_VERIFY_FILE -Algorithm SHA256).Hash.ToLowerInvariant(); ' +
-            'if ($actual -ne $env:OPENVPN_BUILD_VERIFY_SHA256) { Write-Error (\'SHA-256 mismatch: \' + $actual); exit 1 }"',
-            0,
-            true);
-        if (result != 0)
-            throw new Error("SHA-256 verification failed for " + this.outNames[0] + ".");
-    } finally {
-        builder.env("OPENVPN_BUILD_VERIFY_FILE") = "";
-        builder.env("OPENVPN_BUILD_VERIFY_SHA256") = "";
+    var fileName = builder.fso.GetAbsolutePathName(this.outNames[0]);
+    var process = builder.wsh.Exec('certutil.exe -hashfile "' + _CMD(fileName) + '" SHA256');
+    var stdout = process.StdOut.ReadAll();
+    var stderr = process.StdErr.ReadAll();
+    if (process.ExitCode != 0) {
+        throw new Error(
+            "Could not calculate SHA-256 for " + this.outNames[0] + ":\n" +
+            stdout + stderr);
     }
+
+    var actual = null;
+    var lines = stdout.replace(/\r/g, "").split("\n");
+    for (var i in lines) {
+        var candidate = lines[i].replace(/\s/g, "");
+        if (/^[0-9a-f]{64}$/i.test(candidate)) {
+            actual = candidate.toLowerCase();
+            break;
+        }
+    }
+    if (!actual)
+        throw new Error("Could not parse SHA-256 output for " + this.outNames[0] + ":\n" + stdout);
+    if (actual != this.sha256) {
+        throw new Error(
+            "SHA-256 verification failed for " + this.outNames[0] + ".\n" +
+            "Expected: " + this.sha256 + "\n" +
+            "Actual:   " + actual);
+    }
+    WScript.Echo("SHA-256 verified: " + actual + "  " + this.outNames[0]);
 }
 
 
