@@ -18,15 +18,13 @@ jobs:
   stable-update:
     name: Check for a stable OpenVPN update
     runs-on: ubuntu-24.04
-    env:
-      AUTOMATION_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          token: ${{ env.AUTOMATION_TOKEN }}
+          persist-credentials: false
 
       - name: Checkout the OpenVPN submodule
         run: git submodule update --init src/openvpn
@@ -35,7 +33,7 @@ jobs:
         id: prepare
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ env.AUTOMATION_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
         run: |
           python3 .github/scripts/prepare-stable-update.py \
               --output "$GITHUB_OUTPUT" \
@@ -46,7 +44,7 @@ jobs:
         id: existing-pr
         if: steps.prepare.outputs.status == 'prepared'
         env:
-          GH_TOKEN: ${{ env.AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
           UPDATE_BRANCH: ${{ steps.prepare.outputs.branch }}
         run: |
           pr_url=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
@@ -78,7 +76,7 @@ jobs:
         if: steps.validate.outcome == 'success'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ env.AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
           UPDATE_BRANCH: ${{ steps.prepare.outputs.branch }}
           VERSION: ${{ steps.prepare.outputs.version }}
           REPORT: ${{ steps.prepare.outputs.report }}
@@ -96,7 +94,8 @@ jobs:
           git config user.name "openvpn-windows-xor automation"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/openvpn tunnelblick-patches windows-msi/version.m4
-          git commit -m "chore: update OpenVPN to stable $VERSION"
+          git -c core.hooksPath=/dev/null commit -m "chore: update OpenVPN to stable $VERSION"
+          gh auth setup-git
           git push --force origin "HEAD:refs/heads/$UPDATE_BRANCH"
 
           pr_url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base master \
@@ -115,8 +114,10 @@ jobs:
            steps.create-pr.outcome == 'failure')
         env:
           REPORT: ${{ steps.prepare.outputs.report }}
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+          CREATE_PR_OUTCOME: ${{ steps.create-pr.outcome }}
         run: |
-          if [ "${{ steps.validate.outcome }}" = "failure" ]; then
+          if [ "$VALIDATE_OUTCOME" = "failure" ]; then
             {
               echo
               echo "### Automated validation failed"
@@ -131,7 +132,7 @@ jobs:
               echo '</details>'
             } >> "$REPORT"
           fi
-          if [ "${{ steps.create-pr.outcome }}" = "failure" ]; then
+          if [ "$CREATE_PR_OUTCOME" = "failure" ]; then
             {
               echo
               echo "### Pull request creation failed"
@@ -154,7 +155,7 @@ jobs:
            steps.validate.outcome == 'failure' ||
            steps.create-pr.outcome == 'failure')
         env:
-          GH_TOKEN: ${{ env.AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
           VERSION: ${{ steps.prepare.outputs.version }}
           REPORT: ${{ steps.prepare.outputs.report }}
         run: |
@@ -175,7 +176,7 @@ jobs:
       - name: Close resolved tracking issue
         if: steps.create-pr.outcome == 'success'
         env:
-          GH_TOKEN: ${{ env.AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.STABLE_UPDATE_TOKEN || github.token }}
           VERSION: ${{ steps.prepare.outputs.version }}
           PR_URL: ${{ steps.create-pr.outputs.url }}
         run: |

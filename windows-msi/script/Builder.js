@@ -626,6 +626,7 @@ PreprocessBuildRule.prototype.transform = function (builder, str)
  * 
  * @param outName   Output .wixobj file name
  * @param inName    Input .wxs file name
+ * @param sha256    Expected SHA-256 digest
  * @param depNames  Additional dependencies
  * @param flags     Additional WiX Candle flags
  *
@@ -739,15 +740,19 @@ WiXLinkBuildRule.prototype.clean = BuildRule.prototype.clean;
  * 
  * @param outName   Output file name
  * @param url       URL to retrieve data from
+ * @param sha256    Expected SHA-256 digest
  * @param depNames  Additional dependencies
  *
  * @returns  Build rule
  */
-function DownloadBuildRule(outName, url, depNames)
+function DownloadBuildRule(outName, url, sha256, depNames)
 {
     BuildRule.call(this, [outName], depNames);
 
     this.url = url;
+    this.sha256 = sha256.toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(this.sha256))
+        throw new Error("Invalid SHA-256 digest for " + url + ".");
 
     return this;
 }
@@ -777,7 +782,46 @@ DownloadBuildRule.prototype.build = function (builder)
     } else
         throw new Error("GET " + this.url + " failed with status " + req.Status + " " + req.StatusText + ".");
 
+    this.verify(builder);
     BuildRule.prototype.build.call(this, builder);
+}
+
+
+/**
+ * Verifies the downloaded file before it is executed or packaged.
+ *
+ * @param builder  The builder object
+ */
+DownloadBuildRule.prototype.verify = function (builder)
+{
+    var fileName = builder.fso.GetAbsolutePathName(this.outNames[0]);
+    var process = builder.wsh.Exec('certutil.exe -hashfile "' + _CMD(fileName) + '" SHA256');
+    var stdout = process.StdOut.ReadAll();
+    var stderr = process.StdErr.ReadAll();
+    if (process.ExitCode != 0) {
+        throw new Error(
+            "Could not calculate SHA-256 for " + this.outNames[0] + ":\n" +
+            stdout + stderr);
+    }
+
+    var actual = null;
+    var lines = stdout.replace(/\r/g, "").split("\n");
+    for (var i in lines) {
+        var candidate = lines[i].replace(/\s/g, "");
+        if (/^[0-9a-f]{64}$/i.test(candidate)) {
+            actual = candidate.toLowerCase();
+            break;
+        }
+    }
+    if (!actual)
+        throw new Error("Could not parse SHA-256 output for " + this.outNames[0] + ":\n" + stdout);
+    if (actual != this.sha256) {
+        throw new Error(
+            "SHA-256 verification failed for " + this.outNames[0] + ".\n" +
+            "Expected: " + this.sha256 + "\n" +
+            "Actual:   " + actual);
+    }
+    WScript.Echo("SHA-256 verified: " + actual + "  " + this.outNames[0]);
 }
 
 
@@ -788,7 +832,13 @@ DownloadBuildRule.prototype.build = function (builder)
  * 
  * @returns  Oldest timestamp of the output files if all exist; 0 otherwise
  */
-DownloadBuildRule.prototype.buildTime = BuildRule.prototype.buildTime;
+DownloadBuildRule.prototype.buildTime = function (builder)
+{
+    var ts = BuildRule.prototype.buildTime.call(this, builder);
+    if (ts != 0)
+        this.verify(builder);
+    return ts;
+}
 
 
 /**

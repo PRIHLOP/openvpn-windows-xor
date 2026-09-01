@@ -6,8 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write   # This is required for requesting the JWT
-  contents: read    # This is required for actions/checkoutjobs
+  contents: read
 
 jobs:
   msvc:
@@ -18,11 +17,6 @@ jobs:
     env:
       CMAKE: cmake.exe
       WIX: ${{ github.workspace }}\wix\
-      JsignJar: ${{ github.workspace }}\jsign.jar
-      SigningStoreType: GOOGLECLOUD
-      SigningKeyStore: ${{ secrets.GOOGLE_CLOUD_KMS_KEYRING }}
-      SigningStoreKeyName: ${{ secrets.GOOGLE_CLOUD_KMS_KEY }}
-      SigningCertificateFile: ${{ github.workspace }}/certificate.pem
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
 
     name: 'openvpn-build'
@@ -34,6 +28,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
+          persist-credentials: false
 
       # This is the whole point of this fork: patch the OpenVPN sources with the
       # Tunnelblick XOR ("scramble") obfuscation patch before anything is built.
@@ -52,14 +47,19 @@ jobs:
           }
           git --no-pager diff --stat
 
+      - name: Resolve dependency revisions
+        id: dependency-revisions
+        run: |
+          "vcpkg=$(git -C src/vcpkg rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          "openvpn=$(git -C src/openvpn rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          "openvpn_gui=$(git -C src/openvpn-gui rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+
       - name: Restore vcpkg cache
         id: vcpkg-restore
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: "${{ github.workspace }}/vcpkg_cache"
-          key: vcpkg-${{ matrix.arch }}-${{ hashFiles('**/src/openvpn/contrib/vcpkg-manifests/windows/vcpkg.json', '**/src/vcpkg/ports/openssl/vcpkg.json') }}
-          restore-keys: |
-            vcpkg-${{ matrix.arch }}-
+          key: vcpkg-${{ matrix.arch }}-${{ steps.dependency-revisions.outputs.vcpkg }}-${{ steps.dependency-revisions.outputs.openvpn }}-${{ steps.dependency-revisions.outputs.openvpn_gui }}-${{ hashFiles('windows-msi/vcpkg-ports/**', 'src/openvpn/contrib/vcpkg-manifests/windows/**', 'src/openvpn/contrib/vcpkg-ports/**', 'src/openvpn/contrib/vcpkg-triplets/**') }}
 
       - name: Install vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
@@ -67,30 +67,24 @@ jobs:
           vcpkgDirectory: '${{ github.workspace }}/src/vcpkg'
           vcpkgJsonGlob: '**/src/openvpn/contrib/vcpkg-manifests/windows/vcpkg.json'
 
-      - name: Get latest CMake and ninja
-        uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+      - name: Verify runner build tools
+        run: |
+          cmake --version
+          ninja --version
 
       - name: Install rst2html
-        run: python -m pip install --upgrade pip docutils
+        run: python -m pip install --require-hashes -r .github/requirements-build.txt
 
       - name: Setup MSVC prompt
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
-      - name: Set up Java
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        if: ${{ env.SigningKeyStore != '' }}
-        with:
-          java-version: 17
-          distribution: 'temurin'
-
-      - name: Download Jsign
-        if: ${{ env.SigningKeyStore != '' }}
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/ebourg/jsign/releases/download/6.0/jsign-6.0.jar" -OutFile jsign.jar
-
       - name: Install Wix 3.14.1
         run: |
           Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile wix.zip
+          $ActualHash = (Get-FileHash -LiteralPath wix.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ActualHash -ne "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31") {
+            throw "WiX archive SHA-256 mismatch: $ActualHash"
+          }
           Expand-Archive -Path .\wix.zip -DestinationPath wix\bin
 
       - name: Bump version
@@ -107,47 +101,34 @@ jobs:
           $version_m4 -replace '^define\(\[PRODUCT_CODE\], \[\{(?<ProductCode>.*)\}]\)', "define([PRODUCT_CODE], [{${NewProductCode}}])" `
             -replace '^define\(\[PRODUCT_VERSION\], \[(.*?)\]\)', "define([PRODUCT_VERSION], [${NewProductVersion}])" | Out-File -Encoding ASCII version.m4
 
-      - name: Authenticate to Google Cloud
-        id: 'auth'
-        uses: 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093' # v3
-        if: ${{ env.SigningKeyStore != '' }}
-        with:
-          create_credentials_file: false
-          token_format: 'access_token'
-          workload_identity_provider: ${{ secrets.GOOGLE_CLOUD_WIP }}
-          service_account: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT }}
-          access_token_lifetime: '600s'
-
-      - name: Build and Sign
-        working-directory: windows-msi
-        env:
-           SigningStorePass: ${{ steps.auth.outputs.access_token }}
-        if: ${{ env.SigningKeyStore != '' }}
-        run: |
-          echo "${{ secrets.SIGNING_CERTIFICATE }}" >${{ github.workspace }}/certificate.pem
-          ./build-and-package.ps1 -sign -arch ${{ matrix.arch }}
-
       - name: Build
         working-directory: windows-msi
-        if: ${{ env.SigningKeyStore == '' }}
         run: |
           ./build-and-package.ps1 -arch ${{ matrix.arch }}
 
       - name: Rename MSI
         run: |
           $commit = git -C ./src/openvpn rev-parse --short HEAD
-          $dt = Get-Date -Format "yyyyMMddThhmm"
+          $dt = Get-Date -Format "yyyyMMddTHHmm"
           $orig_msi_name = (Get-Item .\windows-msi\image\*-${{ matrix.arch }}.msi).Name
           $msi_name = $orig_msi_name -replace '^(OpenVPN-.*?)-(${{ matrix.arch }}\.msi)', "`$1+${dt}-${commit}-`$2"
           mv .\windows-msi\image\$orig_msi_name .\windows-msi\image\$msi_name
 
+      - name: Create checksum
+        run: |
+          $Msi = Get-Item .\windows-msi\image\*-${{ matrix.arch }}.msi
+          $Hash = (Get-FileHash -LiteralPath $Msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$Hash  $($Msi.Name)" | Out-File -Encoding ascii -NoNewline "$($Msi.FullName).sha256"
+
       - name: Archive MSI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: openvpn-msi-${{ matrix.arch }}
-          path: ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi
+          name: ci-unsigned-msi-${{ matrix.arch }}
+          path: |
+            ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi
+            ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi.sha256
           if-no-files-found: error
-          archive: false
+          compression-level: 0
 
       - name: Save vcpkg cache
         if: steps.vcpkg-restore.outputs.cache-hit != 'true'
@@ -168,6 +149,8 @@ jobs:
     steps:
       - name: Checkout openvpn-build
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Checkout the openvpn submodule only
         run: git submodule update --init src/openvpn
@@ -217,17 +200,17 @@ jobs:
               -subj '/CN=OpenVPN CI test' >/dev/null 2>&1
           chmod 600 /tmp/test-ca.key
           # every method must be accepted by the option parser
-          for method in "xormask KEY" "xorptrpos" "reverse" "obfuscate KEY"; do
-            read -r -a scramble_args <<< "$method"
+          for m in "xormask KEY" "xorptrpos" "reverse" "obfuscate KEY"; do
+            read -r -a scramble_args <<< "$m"
             out=$(timeout 10 ./src/openvpn/openvpn --dev tun --client --remote 127.0.0.1 \
                 --auth-user-pass /tmp/creds --ca /tmp/test-ca.crt \
                 --scramble "${scramble_args[@]}" 2>&1 || true)
             if echo "$out" | grep -qi "Options error"; then
-              echo "FAIL: scramble $method rejected"
+              echo "FAIL: scramble $m rejected"
               echo "$out" | tail -3
               exit 1
             fi
-            echo "ok: scramble $method"
+            echo "ok: scramble $m"
           done
           # and it must turn data channel offload off, otherwise the data channel
           # would bypass the obfuscation entirely
@@ -238,16 +221,197 @@ jobs:
               || { echo "FAIL: --scramble did not disable DCO"; exit 1; }
           echo "ok: --scramble disables DCO"
 
-  release:
-    name: Publish GitHub Release
+  signed-msvc:
+    name: Sign release MSI (${{ matrix.arch }})
+    if: >-
+      github.repository == 'PRIHLOP/openvpn-windows-xor' &&
+      startsWith(github.ref, 'refs/tags/openvpn-install-') &&
+      endsWith(github.ref, '-xor')
     needs: [msvc, patch-check]
-    if: startsWith(github.ref, 'refs/tags/openvpn-install-') && endsWith(github.ref, '-xor')
+    runs-on: windows-2022
+    environment: release-signing
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    strategy:
+      matrix:
+        arch: [x86, amd64, arm64]
+
+    env:
+      CMAKE: cmake.exe
+      WIX: ${{ github.workspace }}\wix\
+      JsignJar: ${{ github.workspace }}\jsign.jar
+      SigningStoreType: GOOGLECLOUD
+      SigningKeyStore: ${{ secrets.GOOGLE_CLOUD_KMS_KEYRING }}
+      SigningStoreKeyName: ${{ secrets.GOOGLE_CLOUD_KMS_KEY }}
+      SigningCertificateFile: ${{ github.workspace }}\certificate.pem
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
+
+    steps:
+      - name: Checkout trusted release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+
+      - name: Validate release tag
+        run: |
+          $VersionLines = @(Select-String -Path windows-msi/version.m4 `
+              -Pattern '^define\(\[PACKAGE_VERSION\], \[([^]]+)\]\)$')
+          if ($VersionLines.Count -ne 1 -or $VersionLines[0].Matches.Count -ne 1) {
+            throw "Could not read PACKAGE_VERSION from windows-msi/version.m4"
+          }
+          $PackageVersion = $VersionLines[0].Matches[0].Groups[1].Value
+          $ExpectedTag = "openvpn-install-$PackageVersion"
+          if ($env:GITHUB_REF_NAME -cne $ExpectedTag) {
+            throw "Release tag '$env:GITHUB_REF_NAME' does not match '$ExpectedTag'"
+          }
+
+      - name: Apply Tunnelblick XOR patches
+        working-directory: src/openvpn
+        run: |
+          Get-ChildItem "${{ github.workspace }}\tunnelblick-patches\*.diff" | Sort-Object Name | ForEach-Object {
+            Write-Host "Applying $($_.Name)"
+            git apply --ignore-whitespace -v $_.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to apply $($_.Name)"
+            }
+          }
+
+      - name: Resolve dependency revisions
+        id: dependency-revisions
+        run: |
+          "vcpkg=$(git -C src/vcpkg rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          "openvpn=$(git -C src/openvpn rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          "openvpn_gui=$(git -C src/openvpn-gui rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+
+      - name: Restore exact vcpkg cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: "${{ github.workspace }}/vcpkg_cache"
+          key: vcpkg-${{ matrix.arch }}-${{ steps.dependency-revisions.outputs.vcpkg }}-${{ steps.dependency-revisions.outputs.openvpn }}-${{ steps.dependency-revisions.outputs.openvpn_gui }}-${{ hashFiles('windows-msi/vcpkg-ports/**', 'src/openvpn/contrib/vcpkg-manifests/windows/**', 'src/openvpn/contrib/vcpkg-ports/**', 'src/openvpn/contrib/vcpkg-triplets/**') }}
+
+      - name: Install vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/src/vcpkg'
+          vcpkgJsonGlob: '**/src/openvpn/contrib/vcpkg-manifests/windows/vcpkg.json'
+
+      - name: Verify runner build tools
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Install rst2html
+        run: python -m pip install --require-hashes -r .github/requirements-build.txt
+
+      - name: Setup MSVC prompt
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Download verified Jsign 7.5
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/ebourg/jsign/releases/download/7.5/jsign-7.5.jar" -OutFile jsign.jar
+          $ActualHash = (Get-FileHash -LiteralPath jsign.jar -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ActualHash -ne "602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c") {
+            throw "Jsign SHA-256 mismatch: $ActualHash"
+          }
+
+      - name: Install verified WiX 3.14.1
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" -OutFile wix.zip
+          $ActualHash = (Get-FileHash -LiteralPath wix.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($ActualHash -ne "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31") {
+            throw "WiX archive SHA-256 mismatch: $ActualHash"
+          }
+          Expand-Archive -Path .\wix.zip -DestinationPath wix\bin
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          create_credentials_file: false
+          token_format: access_token
+          workload_identity_provider: ${{ secrets.GOOGLE_CLOUD_WIP }}
+          service_account: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT }}
+          access_token_lifetime: 600s
+
+      - name: Build and sign
+        working-directory: windows-msi
+        env:
+          SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
+          SigningStorePass: ${{ steps.auth.outputs.access_token }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE)) {
+            throw "SIGNING_CERTIFICATE is not configured"
+          }
+          [System.IO.File]::WriteAllText(
+            $env:SigningCertificateFile,
+            $env:SIGNING_CERTIFICATE,
+            [System.Text.Encoding]::ASCII)
+          try {
+            ./build-and-package.ps1 -sign -arch ${{ matrix.arch }}
+            $MsiFiles = @(Get-ChildItem -LiteralPath image -Filter "*-${{ matrix.arch }}.msi")
+            if ($MsiFiles.Count -ne 1) {
+              throw "Expected one ${{ matrix.arch }} MSI after signing, found $($MsiFiles.Count)"
+            }
+            $Signature = Get-AuthenticodeSignature -FilePath $MsiFiles[0].FullName
+            if ($Signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+              throw "Authenticode verification failed for $($MsiFiles[0].Name): $($Signature.StatusMessage)"
+            }
+            Write-Host "Verified Authenticode signature: $($Signature.SignerCertificate.Subject)"
+          } finally {
+            Remove-Item -LiteralPath $env:SigningCertificateFile -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Rename MSI and create checksum
+        id: signed-artifact
+        run: |
+          $Commit = git -C ./src/openvpn rev-parse --short HEAD
+          $Timestamp = Get-Date -Format "yyyyMMddTHHmm"
+          $Original = Get-Item .\windows-msi\image\*-${{ matrix.arch }}.msi
+          $NewName = $Original.Name -replace '^(OpenVPN-.*?)-(${{ matrix.arch }}\.msi)', "`$1+${Timestamp}-${Commit}-`$2"
+          $Msi = Move-Item -LiteralPath $Original.FullName -Destination ".\windows-msi\image\$NewName" -PassThru
+          $Hash = (Get-FileHash -LiteralPath $Msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$Hash  $($Msi.Name)" | Out-File -Encoding ascii -NoNewline "$($Msi.FullName).sha256"
+          "msi=$($Msi.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Attest signed MSI provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.signed-artifact.outputs.msi }}
+
+      - name: Archive signed MSI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openvpn-msi-${{ matrix.arch }}
+          path: |
+            ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi
+            ${{ github.workspace }}\windows-msi\image\*-${{ matrix.arch }}.msi.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Publish signed GitHub Release
+    if: >-
+      github.repository == 'PRIHLOP/openvpn-windows-xor' &&
+      startsWith(github.ref, 'refs/tags/openvpn-install-') &&
+      endsWith(github.ref, '-xor')
+    needs: signed-msvc
     runs-on: ubuntu-24.04
     permissions:
       contents: write
 
     steps:
-      - name: Download MSI artifacts
+      - name: Download signed MSI artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: openvpn-msi-*
@@ -258,22 +422,23 @@ jobs:
         run: |
           mapfile -t msi_files < <(find release-artifacts -maxdepth 1 -type f -name '*.msi' -print | sort)
           if [ "${#msi_files[@]}" -ne 3 ]; then
-            echo "Expected three MSI files, found ${#msi_files[@]}"
-            printf '%s\n' "${msi_files[@]}"
+            echo "Expected three signed MSI files, found ${#msi_files[@]}"
             exit 1
           fi
-          printf '%s\n' "${msi_files[@]}"
+          cd release-artifacts
+          sha256sum --check ./*.msi.sha256
 
-      - name: Create release and upload MSI files
+      - name: Create release and upload signed artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -t msi_files < <(find release-artifacts -maxdepth 1 -type f -name '*.msi' -print | sort)
+          mapfile -t release_files < <(find release-artifacts -maxdepth 1 -type f \
+              \( -name '*.msi' -o -name '*.msi.sha256' \) -print | sort)
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${msi_files[@]}" \
+            gh release upload "$GITHUB_REF_NAME" "${release_files[@]}" \
                 --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${msi_files[@]}" \
+            gh release create "$GITHUB_REF_NAME" "${release_files[@]}" \
                 --repo "$GITHUB_REPOSITORY" --verify-tag \
                 --title "$GITHUB_REF_NAME" --generate-notes
           fi
