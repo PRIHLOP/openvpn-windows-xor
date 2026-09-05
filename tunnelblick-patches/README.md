@@ -50,7 +50,7 @@ Tunnelblick does not need this patch because DCO does not exist on macOS.
 ## Provenance and local changes
 
 Patches a-e come from Tunnelblick's
-[`third_party/sources/openvpn/openvpn-2.7.6/patches`](https://github.com/Tunnelblick/Tunnelblick/tree/main/third_party/sources/openvpn/openvpn-2.7.6/patches).
+[`third_party/sources/openvpn/openvpn-2.7.7/patches`](https://github.com/Tunnelblick/Tunnelblick/tree/main/third_party/sources/openvpn/openvpn-2.7.7/patches).
 They are **not** all byte-identical copies. Tunnelblick's patch files retain
 some OpenVPN 2.6.x context even in its 2.7.6 directory, so patch 03 is rebased
 onto the pinned 2.7.6 tag where connection environment handling changed.
