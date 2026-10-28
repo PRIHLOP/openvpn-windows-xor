@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -102,6 +103,39 @@ def gitlink_sha(root: Path) -> str:
     return match.group(1)
 
 
+def adapt_patch(name: str, content: bytes, submodule: Path) -> bytes:
+    """Reapply only the documented local adaptations to Tunnelblick patches."""
+    text = content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    if name == PATCH_NAMES[1]:
+        # OpenVPN 2.7 exports local endpoints in setenv_local_entry instead.
+        old = '     setenv_str_i(es, "local_port", e->local_port, i);\n'
+        new_context = ('{\n    setenv_str_i(es, "remote", e->remote, i);\n'
+                       '    setenv_str_i(es, "remote_port", e->remote_port, i);')
+        source = (submodule / "src/openvpn/options.c").read_text(encoding="utf-8")
+        if new_context in source:
+            text = text.replace(old, " {\n")
+        text = text.replace("= strlen(options->ce.xormask);",
+                            "= (int)strlen(options->ce.xormask);")
+    elif name == PATCH_NAMES[3]:
+        text = text.replace("*b = *b ^ i+1;", "*b = (uint8_t)(*b ^ ((i + 1) & 0xff));")
+        text = text.replace("*b = *b ^ ((i + 1) & 0xff);",
+                            "*b = (uint8_t)(*b ^ ((i + 1) & 0xff));")
+    return (text.rstrip("\n") + "\n").encode("utf-8")
+
+
+def check_patch_series(submodule: Path, patch_root: Path) -> None:
+    """Check ordered application without modifying the source checkout."""
+    with tempfile.TemporaryDirectory(prefix="openvpn-patch-check-") as directory:
+        checkout = Path(directory) / "openvpn"
+        run("git", "clone", "--shared", "--no-checkout", str(submodule), str(checkout),
+            cwd=submodule)
+        revision = run("git", "rev-parse", "HEAD", cwd=submodule)
+        run("git", "checkout", "--detach", revision, cwd=checkout)
+        for patch in sorted(patch_root.glob("*.diff")):
+            run("git", "apply", "--ignore-whitespace", "--check", str(patch.resolve()), cwd=checkout)
+            run("git", "apply", "--ignore-whitespace", str(patch.resolve()), cwd=checkout)
+
+
 def prepare(root: Path, report_path: Path) -> dict[str, str]:
     release = api_request(f"/repos/{OPENVPN_REPOSITORY}/releases/latest")
     if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
@@ -187,7 +221,8 @@ def prepare(root: Path, report_path: Path) -> dict[str, str]:
     package_match = re.search(r"define\(\[PACKAGE_VERSION\], \[([^]]+)\]\)", version_text)
     already_current = bool(package_match and package_match.group(1).startswith(f"{version}-"))
     if already_current and gitlink_sha(root) == release_sha:
-        write_report(report_path, base_report + ["The repository already tracks this stable release."])
+        check_patch_series(root / "src/openvpn", root / "tunnelblick-patches")
+        write_report(report_path, base_report + ["The repository already tracks this stable release; patches apply cleanly."])
         return {**common_outputs, "status": "noop"}
 
     submodule = root / "src/openvpn"
@@ -201,8 +236,10 @@ def prepare(root: Path, report_path: Path) -> dict[str, str]:
         url = str(patches[name].get("download_url", ""))
         if not url:
             raise PreparationError(f"Tunnelblick did not provide a download URL for {name}")
-        content = download(url).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        (patch_root / name).write_bytes(content.rstrip(b"\n") + b"\n")
+        content = adapt_patch(name, download(url), submodule)
+        (patch_root / name).write_bytes(content)
+
+    check_patch_series(submodule, patch_root)
 
     major, minor, patch = (int(value) for value in version_match.groups())
     product_build = patch * 100 + 1
@@ -236,6 +273,25 @@ def prepare(root: Path, report_path: Path) -> dict[str, str]:
     )
     patch_readme.write_text(readme_text, encoding="utf-8")
 
+    release_vars = root / "release/vars.example"
+    release_text = release_vars.read_text(encoding="utf-8")
+    release_text = replace_once(
+        release_text, r"OPENVPN_CURRENT_VERSION:-[^}]+", f"OPENVPN_CURRENT_VERSION:-{version}",
+        "release tooling current version",
+    )
+    if package_match:
+        previous_version = package_match.group(1).split("-", 1)[0]
+        release_text = replace_once(
+            release_text, r"OPENVPN_PREVIOUS_VERSION:-[^}]+",
+            f"OPENVPN_PREVIOUS_VERSION:-{previous_version}", "release tooling previous version",
+        )
+    release_vars.write_text(release_text, encoding="utf-8")
+
+    readme = root / "README.md"
+    readme.write_text(re.sub(r"openvpn-install-\d+\.\d+\.\d+-I001-xor",
+                             f"openvpn-install-{version}-I001-xor",
+                             readme.read_text(encoding="utf-8")), encoding="utf-8")
+
     write_report(
         report_path,
         base_report
@@ -243,7 +299,8 @@ def prepare(root: Path, report_path: Path) -> dict[str, str]:
             "### Prepared changes",
             "",
             f"- Pin `src/openvpn` to stable tag `{tag}`.",
-            "- Refresh Tunnelblick XOR patches 02 through 06 from the pinned Tunnelblick commit.",
+            "- Refresh Tunnelblick XOR patches 02 through 06 and restore documented local adaptations.",
+            "- Verify ordered patch application in a clean checkout before updating version metadata.",
             "- Keep the repository-specific DCO patch and validate it with the full patch set.",
             f"- Set the MSI package version to `{version}-I001-xor`.",
             f"- Set the MSI product version to `{major}.{minor}.{product_build}` and generate a new product code.",

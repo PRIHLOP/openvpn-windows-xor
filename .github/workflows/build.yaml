@@ -155,6 +155,9 @@ jobs:
       - name: Checkout the openvpn submodule only
         run: git submodule update --init src/openvpn
 
+      - name: Test stable-update patch adaptations
+        run: python3 .github/scripts/test-stable-update.py
+
       - name: Apply Tunnelblick XOR patches
         working-directory: src/openvpn
         run: |
