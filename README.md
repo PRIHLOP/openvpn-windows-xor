@@ -92,8 +92,8 @@ The stable-update workflow updates `PACKAGE_VERSION`, `PRODUCT_VERSION` and
 use a unique product code. Then create and push the matching tag:
 
 ```sh
-git tag openvpn-install-2.7.6-I001-xor
-git push origin openvpn-install-2.7.6-I001-xor
+git tag openvpn-install-2.7.8-I001-xor
+git push origin openvpn-install-2.7.8-I001-xor
 ```
 
 CI builds all three architectures and runs the XOR patch checks before creating
@@ -139,10 +139,14 @@ fails in a couple of minutes instead of at the end of a full MSI build.
 The `Track stable OpenVPN releases` workflow checks the latest published,
 non-prerelease OpenVPN version daily. It proceeds only after Tunnelblick adds a
 matching `openvpn-<version>/patches` directory. The workflow pins OpenVPN to the
-release tag, refreshes patches 02 through 06, updates MSI version metadata, and
-runs patch, compiler, unit and runtime checks. It creates a PR only when every
-check succeeds without modifying patch hunks. If patches are missing, fail to
-apply, produce warnings, or fail tests, CI creates or updates an
+release tag, refreshes patches 02 through 06, reapplies the documented local
+adaptations, checks ordered application in a clean checkout, updates MSI version
+metadata, release tooling defaults and release-tag examples, and runs patch,
+compiler, unit and runtime checks. It creates a PR only when every
+check succeeds. Only the known context and compiler-warning fixes are automated;
+new conflicts require manual review. Even an already-current release is checked
+for patch applicability. If patches are missing, fail to apply, produce warnings,
+or fail tests, CI creates or updates an
 `automated-stable-update` issue with the diagnostic log instead.
 
 The workflow can use the default `GITHUB_TOKEN` when Actions are allowed to

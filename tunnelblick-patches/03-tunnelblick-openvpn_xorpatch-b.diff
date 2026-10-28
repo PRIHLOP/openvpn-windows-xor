@@ -12,7 +12,7 @@ diff -u -r -x .DS_Store openvpn-2.6.5.old/src/openvpn/options.c openvpn-2.6.5.ne
  #ifdef ENABLE_MANAGEMENT
      o->management_log_history_cache = 250;
 @@ -997,6 +1000,9 @@
-     setenv_str_i(es, "local_port", e->local_port, i);
+ {
      setenv_str_i(es, "remote", e->remote, i);
      setenv_str_i(es, "remote_port", e->remote_port, i);
 +    setenv_int_i(es, "xormethod", e->xormethod, i);
@@ -42,7 +42,7 @@ diff -u -r -x .DS_Store openvpn-2.6.5.old/src/openvpn/options.c openvpn-2.6.5.ne
 +        {
 +            options->ce.xormethod = 1;
 +            options->ce.xormask = p[2];
-+            options->ce.xormasklen = strlen(options->ce.xormask);
++            options->ce.xormasklen = (int)strlen(options->ce.xormask);
 +        }
 +        else if (streq (p[1], "xorptrpos") && (!p[2]))
 +        {
@@ -60,14 +60,14 @@ diff -u -r -x .DS_Store openvpn-2.6.5.old/src/openvpn/options.c openvpn-2.6.5.ne
 +        {
 +            options->ce.xormethod = 4;
 +            options->ce.xormask = p[2];
-+            options->ce.xormasklen = strlen(options->ce.xormask);
++            options->ce.xormasklen = (int)strlen(options->ce.xormask);
 +        }
 +        else if (!p[2])
 +        {
 +            msg (M_WARN, "WARNING: No recognized 'scramble' method specified; using 'scramble xormask \"%s\"'", p[1]);
 +            options->ce.xormethod = 1;
 +            options->ce.xormask = p[1];
-+            options->ce.xormasklen = strlen(options->ce.xormask);
++            options->ce.xormasklen = (int)strlen(options->ce.xormask);
 +        }
 +        else
 +        {
