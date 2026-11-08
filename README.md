@@ -92,8 +92,8 @@ The stable-update workflow updates `PACKAGE_VERSION`, `PRODUCT_VERSION` and
 use a unique product code. Then create and push the matching tag:
 
 ```sh
-git tag openvpn-install-2.7.8-I001-xor
-git push origin openvpn-install-2.7.8-I001-xor
+git tag openvpn-install-2.7.9-I001-xor
+git push origin openvpn-install-2.7.9-I001-xor
 ```
 
 CI builds all three architectures and runs the XOR patch checks before creating
